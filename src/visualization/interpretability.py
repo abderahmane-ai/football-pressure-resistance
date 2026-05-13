@@ -142,7 +142,7 @@ def run_interpretability_analysis():
 
     if 'dist_nearest_opp' in feature_names:
         idx = feature_names.index('dist_nearest_opp')
-        # Cap at training data distribution boundary (tight_pressure_radius = 5 yds)
+        # Capped at training boundary (tight_pressure_radius)
         grid = np.linspace(0.5, SPATIAL_CONFIG['tight_pressure_radius'], 50)
         df_marginal = compute_marginal(idx, grid)
         df_marginal.to_csv(TABLES_DIR / "marginal_dist.csv", index=False)
@@ -182,8 +182,7 @@ def run_interpretability_analysis():
         
         if 'dist_nearest_opp' in feature_names:
             feat_idx = feature_names.index('dist_nearest_opp')
-            # Cap at tight_pressure_radius: all training data has dist <= 5 yds.
-            # Plotting beyond this is out-of-distribution extrapolation.
+            # Capped at training boundary; beyond 5 yds is out-of-distribution
             max_dist = SPATIAL_CONFIG['tight_pressure_radius']
             dist_grid = np.linspace(0.5, max_dist, 50)
             

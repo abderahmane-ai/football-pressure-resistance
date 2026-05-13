@@ -48,13 +48,13 @@ For every filtered pressure event $i$, we construct a rich, highly non-linear ve
 We discard naive additive distance formulas in favor of a continuous **Gaussian Influence Model** (inspired by Fernandez and Bornn's wide-scale pitch control models). It calculates the probabilistic ownership of the ball-carrier's immediate location based on the density and proximity of teammates versus opponents. 
 
 The influence of any set of players at a specific point on the pitch is defined as:
-$$ \text{Influence}(P) = \sum \exp\left( - \frac{d^2}{2\sigma^2} \right) $$
-Where $d$ is the Euclidean distance from the player to the point, and $\sigma$ is the standard deviation of influence, standardized to 4.2 yards. The final Pitch Control metric is the ratio of teammate influence to total influence, mapped to the interval $[-1, 1]$. A negative value indicates severe opponent isolation; a positive value indicates strong teammate support.
+$$ \text{Influence}(P) = \sum_{d \le r_{max}} \exp\left( - \frac{d^2}{2\sigma^2} \right) $$
+Where $d$ is the Euclidean distance from the player to the point, $\sigma = 4.2$ yards (Fernandez/Bornn), and $r_{max} = 15$ yards is the influence cutoff beyond which players have negligible effect. The final Pitch Control metric is the ratio of teammate influence to total influence, mapped to the interval $[-1, 1]$. A negative value indicates severe opponent isolation; a positive value indicates strong teammate support.
 
 ### 3.2 Lane-Aware Progressive Options
 A teammate is no longer considered a "progressive option" merely by standing geographically closer to the opponent's goal. The framework imposes two strict physical constraints:
-1. **Value Constraint:** The teammate must reside in a zone with a higher Expected Threat (xT) than the ball-carrier, or be significantly advanced up the pitch.
-2. **Physics Constraint:** The system utilizes a `LineString` geometric intersection check to verify that the direct passing lane between the ball-carrier and the teammate is physically unblocked by the coverage radii of any defending opponents.
+1. **Value Constraint:** The teammate must occupy a zone with higher xT than the ball-carrier, or be strictly more than 5 yards further up the pitch (`tm_x > bc_x + 5.0`).
+2. **Physics Constraint:** The system utilises a `LineString` geometric intersection check to verify that the direct passing lane between the ball-carrier and the teammate is physically unblocked by the coverage radii of defending opponents (clearance radius: 1.5 yards).
 
 ### 3.3 Angular Coverage Arc ($\Phi$)
 This feature mathematically calculates the "visual wall" presented by opponents within a parameterized coverage radius (e.g., 3.0 yards) of the ball-carrier. Instead of assuming standard block widths, it uses a principled trigonometric formula (`2 * np.arctan((player_width / 2) / distance)`) to derive the exact angular span an opponent's physical body blocks in the passing lane. We calculate the angle of each closing opponent, sort them, and identify the largest angular gap (representing the widest available escape or passing lane). The coverage arc is defined as the remainder of the $2\pi$ circle. A larger $\Phi$ indicates the ball-carrier is heavily surrounded, severely limiting physical escape vectors.
@@ -63,7 +63,21 @@ This feature mathematically calculates the "visual wall" presented by opponents 
 Captures where the pressure is originating from relative to the opponent's goal (the ultimate objective). Angle mapping utilizes proper trigonometric projections (`np.arctan2(y, x)`), orienting relative pressure to the strict $X$-axis of the attacking pitch. This allows the model to differentiate the psychological difficulty of a defender pressing from the blindside (back pressure) versus head-on confrontation.
 
 ### 3.5 Voronoi Area ($A_{vor}$)
-We compute the Voronoi tessellation of all players on the pitch, clipping the resultant polygons to the configured pitch boundaries (e.g., 120x80 yards). If edge cases occur (e.g., perfect collinearity), the system falls back to a statistically rigorous uniform geometric expectation rather than arbitrary grid approximations. $A_{vor}$ is the area of the cell containing the ball-carrier. It mathematically represents the raw square footage of grass the ball-carrier controls outright before facing an immediate tackle.
+We compute the Voronoi tessellation of all players on the pitch, clipping the resultant polygons to the configured pitch boundaries (e.g., 120x80 yards). If edge cases occur (e.g., perfect collinearity, fewer than 4 players in frame), the system falls back to a statistically rigorous grid-based approximation. $A_{vor}$ is the area of the cell containing the ball-carrier — the raw square footage of grass the ball-carrier controls outright before facing an immediate tackle.
+
+### 3.6 Pitch Coordinates ($bc_x$, $bc_y$)
+The ball-carrier's raw pitch coordinates are included as continuous features. Earlier implementations encoded location as a single ordinal zone integer (e.g., zone = zone_x × 4 + zone_y), which imposed a false linear ordering — zone 12 was treated as "4× worse" than zone 3. Raw `bc_x` and `bc_y` are fed directly to the scaler, allowing the model to learn the non-linear pitch geography alongside the xT feature which already captures spatial value.
+
+### 3.7 Match Context Features
+Three non-spatial contextual features are appended to the feature vector from the match event data:
+
+| Feature | Source | Semantics |
+|---------|---------|-----------|
+| `game_state_diff` | Goal tracking (Shot + Own Goal events) | Score differential at event time from ball-carrier's team perspective. Captures clutch-pressure effects and game management behaviour. |
+| `minutes_elapsed` | Event `minute` field | Enables the model to learn fatigue and time-pressure effects. |
+| `match_period` | Event `period` field | Accounts for structural differences between first and second halves (e.g., tactical adjustments, substitutions). |
+
+`game_state_diff` is computed by scanning events chronologically and tracking goals via `type == 'Shot'` with `shot_outcome == 'Goal'` and `type == 'Own Goal For'` events. The differential is recorded *before* each event is processed, ensuring no lookahead leakage.
 
 ---
 
@@ -71,8 +85,8 @@ We compute the Voronoi tessellation of all players on the pitch, clipping the re
 
 To solve the Zero-Inflation problem and the Safe-Pass bias simultaneously, we split the evaluation into two distinct targets:
 
-1. **$Y_{success}$:** A binary variable ($1$ if possession is retained, $0$ if dispossessed). Crucially, the logic traces up to 5 subsequent actions to verify true possession retention (e.g., recognizing "Foul Won" as a success and correctly attributing immediate interceptions by opponents as failures).
-2. **$V_{intended}$:** The Expected Threat (xT) value of the *intended* action, measured continuously. If the event is a pass, it measures the xT of the destination coordinate. If the event is a carry, it evaluates the final destination. 
+1. **$Y_{success}$:** A binary variable ($1$ if possession is retained, $0$ if dispossessed). The logic traces up to exactly 5 subsequent actions (`carry_lookahead_events`) to verify true possession retention — recognising "Foul Won" (by opponent) as success and correctly attributing opponent actions (`Pass`, `Carry`, `Shot`, `Clearance`, `Interception`, `Dispossessed`) as failures. Foul Committed events are only counted as ball-carrier success if the fouling team is the *opponent*, preventing own-team tactical fouls from being mislabelled.
+2. **$V_{intended}$:** The Expected Threat (xT) value of the *intended* action, measured continuously using the Karun Singh 8×12 xT grid. For passes, it measures the xT at the destination coordinate. For carries and dribbles, it evaluates the location of the next action in the sequence.
 
 For the Beta distribution component of our model, $V_{intended}$ is scaled to the open interval $(0, 1)$ using a theoretical maximum value $V_{max}$ and a microscopic smoothing factor $\epsilon = 10^{-6}$:
 $$ V_{scaled} = \left( \frac{V_{intended}}{V_{max}} \right) (1 - 2\epsilon) + \epsilon $$
@@ -89,6 +103,7 @@ The model strictly separates the prediction space into two sequential hurdles:
    $$ Y_{success} \sim \text{Bernoulli}(p) $$
 * **Hurdle 2 (Value Retention):** Modeled via Beta Regression. Evaluated *only* on the subset of data where $Y_{success} = 1$. It predicts the expected value generated $\mu$, given that the ball was not lost.
    $$ V_{scaled} \sim \text{Beta}(\alpha=\mu \kappa, \beta=(1 - \mu) \kappa) $$
+   The concentration parameter $\kappa \sim \text{Exponential}(0.1)$ gives a prior mean of 10, appropriate for Beta regression on bounded xT values. A mean of 1 (the default Exponential(1.0)) would force extreme bimodal distributions and cause numerical instability.
 
 ### 5.2 The Linear Predictors
 Both sub-models utilize a parallel hierarchical linear structure linked via the inverse-logit function:
@@ -98,9 +113,10 @@ $$ \text{logit}(\mu_i) = \alpha_{val} + X_i \beta_{val} + \gamma_{pos, val} + \t
 Where:
 * **$\theta_{player, succ}$:** The player's intrinsic *Ball Security* trait (resistance to being tackled or forcing an error).
 * **$\theta_{player, val}$:** The player's intrinsic *Value Retention* trait (ability to spot and execute dangerous passes despite pressure).
-* $X_i \beta$: The dot product of the standardized geometric features, establishing the mathematical difficulty of the specific situation.
-* $\gamma_{pos}$: The fixed effect for the player's position group (the replacement-level baseline).
-* $\delta_{opp}$: A random effect capturing the specific defensive intensity of the opposing team.
+* $X_i \beta$: The dot product of the standardised feature vector (spatial + contextual), establishing the mathematical difficulty of the specific situation.
+* $\gamma_{pos}$: Fixed effect for the player's position group — the replacement-level baseline within their tactical role.
+* $\delta_{opp}$: Random effect capturing the specific defensive intensity of the opposing team.
+* $\zeta_{comp}$: Random effect capturing the tactical ecosystem and competitive standard of the competition.
 
 ### 5.3 Priors and Non-Centered Parameterization
 We enforce weakly informative Normal priors to provide regularization (shrinkage), preventing the model from overfitting players with small sample sizes (e.g., a youth player who succeeds in 2 out of 2 duals will be shrunk heavily toward the mean). 
@@ -118,7 +134,16 @@ This allows the PyMC sampler to explore the posterior landscape with maximum eff
 A black-box model is useless for elite football scouting. The PRS framework provides explicit, geometric interpretability.
 
 ### 6.1 Covariance-Aware Variance Decomposition
-To understand which components (Player Skill vs. Spatial Difficulty vs. Opponent Quality) drive outcomes, we decompose the variance of the predictions. Instead of naively summing squared $\beta$ coefficients—which assumes spatial features are completely uncorrelated—the script computes the true sample variance of the linear predictor matrix $\text{var}(X \beta)$. This properly accounts for the heavy multi-collinearity between spatial features like density and coverage arcs.
+To understand which components drive outcome variance, we decompose the total variance of the linear predictor into four distinct sources for each sub-model:
+
+| Component | Estimator |
+|-----------|----------|
+| **Player Skill** | $\mathbb{E}[\sigma_\theta^2]$ (posterior mean of squared player SD) |
+| **Opponent Quality** | $\mathbb{E}[\sigma_{opp}^2]$ |
+| **Competition Context** | $\mathbb{E}[\sigma_{comp}^2]$ |
+| **Spatial Features** | $\mathbb{E}[\text{Var}(X\beta)]$ — true sample variance of linear predictor, accounting for multi-collinearity |
+
+Rather than naively summing squared $\beta$ coefficients (which assumes zero correlation between features), the feature component computes the true variance of the full linear predictor matrix $X\beta$ across the dataset. This correctly handles the heavy multi-collinearity between spatial features like density and coverage arcs.
 
 ### 6.2 Counterfactuals and "Best Under" Scenarios
 To identify a player's specialized composure profile, we define orthogonal geometric matrices representing specific, identifiable tactical situations (e.g., "Front_Tight", "Lateral_Loose", "Back_Tight"). 

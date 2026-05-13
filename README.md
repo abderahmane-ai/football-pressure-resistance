@@ -1,61 +1,182 @@
 # Pressure Resistance Score (PRS)
 
-A production-grade Bayesian hierarchical framework for evaluating football players' composure under pressure, leveraging StatsBomb 360 freeze-frame data.
+A production-grade Bayesian hierarchical framework for measuring football player composure under pressure, leveraging StatsBomb 360 freeze-frame data.
 
 ## Overview
-Traditional metrics evaluate passes under pressure but fail to account for the spatial context (e.g., distance to opponents, density, passing angles). The **Pressure Resistance Score (PRS)** uses a **Zero-Inflated Bayesian Hurdle Model** to predict both the *Turnover Risk* (Ball Security) and the *Value Retention* (Expected Threat preserved) by a player during high-pressure duals. 
 
-### Key Innovations:
-1. **Dual-Axis Valuation (Hurdle Model):** We separated the binary outcome (Did they keep the ball?) from the continuous value (How dangerous was the action?). The model evaluates "Ball Security" independently from "Value Retention", identifying players who are safe possession retainers versus high-risk, high-reward progressors.
-2. **Domain-Accurate Spatial Engineering:** Features include Gaussian Pitch Control, which models probabilistic area-ownership using continuous distance-decay functions, and Lane-Aware Progressive Options, ensuring teammates are only considered viable options if the passing lane is unblocked.
-3. **Tight-Pressure Filtering:** Only events where the nearest opponent is within a defined **tight pressure radius** (e.g., 5 yards, driven by spatial configuration) are considered, isolating genuine high-pressure duals and removing "token" pressure.
-4. **Role-Adjusted Fixed Effects:** The model incorporates Position-Group fixed effects (Defender, Midfielder, Forward) dynamically assigned via spatial clustering. PRS therefore measures "Above-Replacement" composure *within a player's specific tactical role*.
-5. **Principled Cross-Validation:** Player performance is correlated not just on raw scores, but on their out-of-sample *expected value residuals* across different tournaments, proving PRS is a highly stable, scoutable trait.
+Traditional metrics evaluate passes under pressure but fail to account for spatial context (distance to opponents, angular coverage, passing lane geometry). The **Pressure Resistance Score (PRS)** uses a **Hierarchical Zero-Inflated Beta Hurdle Model** to simultaneously evaluate *Ball Security* (Turnover Risk) and *Value Retention* (Expected Threat preserved) during tight-pressure duels. Player scores are adjusted for opponent quality, competition context, and positional role — isolating each player's true intrinsic composure trait.
+
+### Key Design Decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| **Hurdle Model** (two-component) | Separates the binary "did they keep it?" from the continuous "how dangerous was the action?" — avoids the safe-pass bias of single metrics |
+| **Non-centered parameterisation** | All random effects sampled as `θ_raw ~ N(0,1)` then scaled, ensuring HMC sampler navigates hierarchical funnels without divergences |
+| **Opponent + Competition random effects** | Removes environmental noise so θ_player reflects skill, not schedule strength |
+| **Tight-pressure filter (≤5 yards)** | Eliminates token pressure events; model only sees genuine close-quarters duels |
+| **Raw `bc_x`, `bc_y` coordinates** | Replaces an ordinal zone integer that falsely implied a linear relationship across pitch thirds |
+| **Parallelised data build** | `ThreadPoolExecutor` across matches; API calls and numpy operations both release the GIL for significant speedup |
+| **Out-of-sample residual correlation** | Gold-standard validation — proves PRS is a stable, transferable trait, not in-sample noise |
+
+---
 
 ## Architecture
 
-* **Data Engineering (`src/data/builder.py`):** Extracts spatial features (Voronoi area, coverage arcs, Gaussian Pitch Control, unblocked passing lanes) from 360° freeze-frames, assigns intended xT values, and maps dynamic position groups.
-* **Bayesian Model (`src/models/bayesian.py`):** A pooled hierarchical Zero-Inflated Beta (Hurdle) regression.
-  * **Turnover Risk (Logistic):** `Bernoulli(p)`
-  * **Value Retention (Beta):** `Beta(mu * kappa, (1-mu) * kappa)`
-  * **Random Effects:** Player Skill ($\theta$), Competition context, and Opponent Team defensive quality estimated for both model components.
-* **Interpretability (`src/visualization/interpretability.py`):** Generates Individual Conditional Expectation (ICE) curves, Population Marginal Effects, and Covariance-Aware Variance Decomposition.
-* **Validation (`src/models/validation.py`):** Calculates out-of-sample stability correlations on a held-out tournament dataset using fully vectorized tensor operations.
+```
+pressure_resistance/
+├── config.py                        # All constants, paths, MCMC settings
+├── run_kfold.py                     # 4-fold cross-validation orchestrator
+└── src/
+    ├── data/
+    │   ├── loader.py                # StatsBomb API caching + I/O
+    │   ├── pairing.py               # Links Pressure → ball-carrier events + 360 frames
+    │   ├── labels.py                # Defines success for Pass/Carry/Dribble
+    │   └── builder.py               # Full pipeline: game state, parallel feature extraction
+    ├── features/
+    │   ├── geometry.py              # Gaussian pitch control, xT grid, Voronoi, angular span
+    │   └── spatial.py               # Freeze-frame → 21-feature vector
+    ├── models/
+    │   ├── bayesian.py              # Hurdle model definition + MCMC sampling
+    │   ├── inference.py             # Posterior → leaderboard + scenario analysis
+    │   └── validation.py            # Out-of-sample residual correlation
+    └── visualization/
+        ├── interpretability.py      # Variance decomposition, ICE curves, marginal effects
+        └── plots.py                 # Publication-ready figures
+```
+
+---
+
+## Feature Vector (21 features)
+
+| Feature | Description |
+|---------|-------------|
+| `dist_nearest_opp` | Euclidean distance to nearest opponent (yards) |
+| `dist_2nd_nearest_opp` | Distance to 2nd nearest opponent |
+| `opps_within_1/2/4yd` | Count of opponents within radius bands |
+| `angle_nearest_opp` | Angle of nearest opponent relative to goal direction |
+| `coverage_arc` | Total angular span blocked by opponents within 3 yds (trigonometric, not hardcoded) |
+| `voronoi_area` | Shapely Voronoi cell area for ball carrier (sq yds), clipped to pitch |
+| `pitch_control` | Gaussian influence ratio at ball-carrier location ∈ [-1, 1] |
+| `opp_density_5yd` | Count of opponents within 5 yards |
+| `n_free_teammates` | Teammates with no opponent within `clear_pass_distance` (2 yds) |
+| `max_free_triangle_area` | Largest triangle area formed by ball carrier + 2 free teammates |
+| `dist_nearest_free_teammate` | Distance to nearest free teammate |
+| `angle_nearest_free_teammate` | Angle to nearest free teammate relative to goal |
+| `has_progressive_option` | Binary: ∃ free teammate in higher-xT zone with unblocked lane |
+| `xt_value` | Karun Singh xT at ball-carrier location |
+| `bc_x`, `bc_y` | Raw pitch coordinates (replaces misleading ordinal zone integer) |
+| `game_state_diff` | Score differential (carrier team − opponent) at event time |
+| `minutes_elapsed` | Match minute |
+| `match_period` | 1 or 2 |
+
+---
+
+## Model Specification
+
+### Turnover Risk (Logistic / Bernoulli)
+$$\text{logit}(p_i) = \alpha_{succ} + X_i\beta_{succ} + \gamma_{pos,succ} + \theta_{player,succ} + \delta_{opp,succ} + \zeta_{comp,succ}$$
+$$Y_{success} \sim \text{Bernoulli}(p_i)$$
+
+### Value Retention (Beta Regression, successes only)
+$$\text{logit}(\mu_i) = \alpha_{val} + X_i\beta_{val} + \gamma_{pos,val} + \theta_{player,val} + \delta_{opp,val} + \zeta_{comp,val}$$
+$$V_{scaled} \sim \text{Beta}(\mu_i \cdot \kappa,\ (1-\mu_i) \cdot \kappa), \quad \kappa \sim \text{Exponential}(0.1)$$
+
+### Priors (all non-centered)
+| Parameter | Prior | Role |
+|-----------|-------|------|
+| `alpha_succ/val` | `Normal(0, 1.5)` | Global intercept |
+| `beta_succ/val` | `Normal(0, 1.0)` | Feature coefficients (spatial + contextual) |
+| `gamma_pos` | `Normal(0, 1.0)` | Position group fixed effect |
+| `sigma_theta` | `Exponential(1.0)` | Player skill spread |
+| `theta_player` | `theta_raw * sigma_theta` | Individual player composure |
+| `sigma_opp/comp` | `Exponential(1.0)` | Environment noise spread |
+| `delta_opp / zeta_comp` | `raw * sigma` | Opponent / competition effects |
+| `kappa` | `Exponential(0.1)` | Beta concentration (mean=10) |
+
+---
 
 ## Setup & Installation
 
-Ensure you have Python 3.10+ installed. Install the necessary dependencies:
+Requires Python 3.10+.
 
 ```bash
-pip install pandas numpy scipy scikit-learn matplotlib seaborn pymc arviz statsbombpy tqdm shapely
+pip install pandas numpy scipy scikit-learn matplotlib seaborn \
+            pymc arviz statsbombpy tqdm shapely
 ```
-*(If you are on macOS or Linux, ensure you have a C-compiler installed for PyMC's backend, though `numpyro` is highly recommended for faster sampling).*
+
+For hardware-accelerated MCMC (strongly recommended on Apple Silicon):
+```bash
+pip install numpyro jax jaxlib
+pip install jax-metal        # Mac GPU backend
+```
+
+---
 
 ## Running the Pipeline
 
-Execute the pipeline sequentially from the project root directory:
-
+### Option A — Full 4-Fold Cross-Validation (recommended)
 ```bash
-# 1. Download data, apply tight-pressure filters, and engineer features
+python3 run_kfold.py
+```
+This sequentially rotates through all 4 competitions as holdout and reports aggregate Pearson correlation and AUC.
+
+### Option B — Single Run
+```bash
+# 1. Download, filter, and build feature dataset (parallelised)
 python3 -m src.data.builder
 
-# 2. Fit the hierarchical Zero-Inflated Beta regression model (MCMC sampling)
+# 2. Fit hierarchical Hurdle model (MCMC)
 python3 -m src.models.bayesian
 
-# 3. Extract player dual metrics, calculate HDI, and categorize 'Best Under' scenarios
+# 3. Extract leaderboard + scenario profiles
 python3 -m src.models.inference
 
-# 4. Validate model via residual-based cross-tournament correlation
+# 4. Validate via out-of-sample residual correlation
 python3 -m src.models.validation
 
-# 5. Extract variance decomposition and population marginal effects
+# 5. Variance decomposition + marginal effects
 python3 -m src.visualization.interpretability
 
-# 6. Generate publication-ready visualizations
+# 6. Generate publication figures
 python3 -m src.visualization.plots
 ```
 
+### Holdout Competition
+Controlled via the `PRS_HOLDOUT` environment variable (default: `Euro_2020`). Must be set before running the full pipeline:
+```bash
+export PRS_HOLDOUT=World_Cup_2022
+python3 -m src.data.builder
+python3 -m src.models.bayesian
+python3 -m src.models.inference
+python3 -m src.models.validation
+```
+
+---
+
+## Competitions (StatsBomb 360 Open Data)
+
+| Key | Competition | Season | comp_id | season_id |
+|-----|------------|--------|---------|-----------|
+| `Euro_2020` | UEFA Euro | 2020 | 55 | 43 |
+| `Euro_2024` | UEFA Euro | 2024 | 55 | 282 |
+| `World_Cup_2022` | FIFA World Cup | 2022 | 43 | 106 |
+| `Bundesliga_2024` | Bundesliga | 2023/24 | 9 | 281 |
+
+---
+
 ## Output Artifacts
-* **`outputs/tables/prs_leaderboard.csv`**: The primary output containing each player's Ball Security score, Value Retention score, Combined PRS, and specialized composure profile.
-* **`outputs/figures/`**: Contains visual insights including 2D scatter plots (Turnover Risk vs Value Retention), marginal threat curves, feature importance bar charts, and the stability scatter plot.
-* **`outputs/model_traces/`**: Contains the raw NetCDF trace files from the PyMC sampler for custom downstream analysis.
+
+| Path | Description |
+|------|-------------|
+| `outputs/tables/prs_leaderboard.csv` | Player Ball Security, Value Retention, PRS, HDI, best scenario |
+| `outputs/tables/feature_importance.csv` | Standardized β coefficients with 90% HDI for both sub-models |
+| `outputs/tables/variance_decomposition.csv` | Variance split: Player Skill / Opp Quality / Competition / Spatial Features |
+| `outputs/tables/holdout_correlation_data.csv` | Per-player training PRS vs holdout residuals |
+| `outputs/tables/holdout_metrics.csv` | Pearson r, p-value, AUC |
+| `outputs/tables/kfold_results.csv` | Aggregate 4-fold validation results |
+| `outputs/figures/1_leaderboard_2D.png` | Ball Security vs Value Retention scatter (top 30) |
+| `outputs/figures/2_feature_importance.png` | Feature coefficient bar chart (both sub-models) |
+| `outputs/figures/3_marginal_dist.png` | Population marginal effect — nearest opponent distance |
+| `outputs/figures/3_marginal_arc.png` | Population marginal effect — coverage arc |
+| `outputs/figures/7_stability_scatter.png` | Training PRS vs holdout residuals |
+| `outputs/model_traces/pooled_trace.nc` | Full MCMC posterior (NetCDF) |

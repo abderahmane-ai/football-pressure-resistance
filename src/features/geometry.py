@@ -16,12 +16,11 @@ def _gaussian_influence(point, players, max_radius=15.0):
         return 0.0
     players = np.array(players)
     dists = np.linalg.norm(players - point, axis=1)
-    # Only consider players within max_radius
     close_mask = dists <= max_radius
     if not np.any(close_mask):
         return 0.0
     close_dists = dists[close_mask]
-    sigma = SPATIAL_CONFIG['pitch_control_sigma']  # Fernandez/Bornn: 4.2 yards
+    sigma = SPATIAL_CONFIG['pitch_control_sigma']  # Fernandez/Bornn: 4.2 yds
     influence = np.sum(np.exp(-(close_dists**2) / (2 * sigma**2)))
     return influence
 
@@ -39,10 +38,9 @@ def pitch_control_value(bc, teammates, opponents):
         return 0.0
         
     pc_prob = tm_influence / total
-    # Scale to [-1, 1]
-    return (pc_prob * 2) - 1.0
+    return (pc_prob * 2) - 1.0  # Rescaled to [-1, 1]
 
-# Authentic Karun Singh xT grid values
+# Karun Singh xT grid (8×12)
 XT_GRID_VALUES = np.array([
     [0.00638, 0.00779, 0.00844, 0.00977, 0.01126, 0.01248, 0.01473, 0.01745, 0.02122, 0.02756, 0.03485, 0.03792],
     [0.00681, 0.00878, 0.00942, 0.01121, 0.01237, 0.01288, 0.01552, 0.01918, 0.02412, 0.03401, 0.04647, 0.05401],
@@ -147,21 +145,19 @@ def angular_span(ball_carrier, opponents, radius):
     if len(close_opps) == 0:
         return 0.0
         
-    # Note: arctan2 signature is (y, x). The previous code used (y, x).
     angles = np.arctan2(close_opps[:, 1] - bc[1], close_opps[:, 0] - bc[0])
-    
     angles = np.sort(angles)
+
     if len(angles) == 1:
-        # Principled trigonometric formula from methodology: 2 * arctan(player_width/2 / distance)
         dist = distances[distances <= radius][0]
-        dist = max(dist, 0.01)  # Guard against division by zero
+        dist = max(dist, 0.01)  # Avoid division by zero
         player_width = SPATIAL_CONFIG['player_width']
-        return 2.0 * np.arctan((player_width / 2.0) / dist)
-        
+        return 2.0 * np.arctan((player_width / 2.0) / dist)  # 2·arctan(w/2 / d)
+
     angles_wrapped = np.append(angles, angles[0] + 2 * np.pi)
     gaps = np.diff(angles_wrapped)
     max_gap = np.max(gaps)
-    
+
     span = 2 * np.pi - max_gap
     return span
 

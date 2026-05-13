@@ -22,7 +22,7 @@ def pair_pressure_with_ball_carrier(events, frames_dict):
         
     pressure_events = events[events['type'] == 'Pressure']
     
-    # Pre-process frames into a dict by event_uuid for O(1) lookup
+    # O(1) frame lookup by event_uuid
     frames_lookup = {}
     if isinstance(frames_dict, pd.DataFrame) and not frames_dict.empty and 'event_uuid' in frames_dict.columns:
         for _, row in frames_dict.iterrows():
@@ -37,8 +37,7 @@ def pair_pressure_with_ball_carrier(events, frames_dict):
                     related_event_ids = ast.literal_eval(related_event_ids)
                 except Exception:
                     continue
-            # Handle numpy arrays from parquet
-            elif hasattr(related_event_ids, 'tolist'):
+            elif hasattr(related_event_ids, 'tolist'):  # numpy array (parquet round-trip)
                 related_event_ids = related_event_ids.tolist()
                     
             if not isinstance(related_event_ids, list) or len(related_event_ids) == 0:

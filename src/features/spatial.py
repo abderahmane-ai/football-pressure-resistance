@@ -44,8 +44,7 @@ def extract_spatial_features_from_frame(frame_data, ball_carrier_player_id, team
             
     bc = np.array(ball_carrier)
     opps = np.array(opponents) if opponents else np.array([])
-    # Exclude the ball carrier from the teammate environment — they are the actor,
-    # not a passing option, and including them at distance=0 biases pitch control.
+    # Exclude actor from teammate env; distance=0 self-inclusion biases pitch_control
     env_teammates = [loc for loc in teammates if not np.allclose(loc, ball_carrier)]
     tms = np.array(env_teammates) if env_teammates else np.array([])    
     features = {}
@@ -144,8 +143,7 @@ def extract_spatial_features_from_frame(frame_data, ball_carrier_player_id, team
     
     features['xt_value'] = bc_xt
     
-    # Raw pitch coordinates — more informative than a zone integer which implies
-    # a false ordinal relationship (zone 12 ≠ "4x worse than zone 3").
+    # Raw coordinates; no false ordinal relationship (cf. zone integer)
     features['bc_x'] = float(bc[0])
     features['bc_y'] = float(bc[1])
         

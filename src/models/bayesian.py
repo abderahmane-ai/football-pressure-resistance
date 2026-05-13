@@ -93,7 +93,7 @@ def fit_pooled_model():
             'position_lookup': pos_lookup
         }, f)
         
-    # Mask for the Value Retention (Beta) model
+    # Beta model subset: successes only
     mask = y_success == 1
     X_val = X_scaled[mask]
     y_val_scaled = y_value_scaled[mask]
@@ -167,7 +167,7 @@ def fit_pooled_model():
                     zeta_comp_val[cid_val])
         
         mu = pm.Deterministic("mu", pm.math.invlogit(logit_mu))
-        kappa = pm.Exponential("kappa", 0.1)  # Mean=10; appropriate concentration for Beta regression
+        kappa = pm.Exponential("kappa", 0.1)  # Mean=10; stable concentration for Beta regression
         
         alpha_beta = mu * kappa
         beta_beta = (1 - mu) * kappa

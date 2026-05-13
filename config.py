@@ -31,6 +31,8 @@ MODEL_SETTINGS = {
     "nuts_sampler": "numpyro",
 }
 
+MIN_EVENTS_THRESHOLD = 20  # Minimum pressure events for leaderboard inclusion
+
 # Domain Spatial Constants
 SPATIAL_CONFIG = {
     "pitch_length": 120.0,

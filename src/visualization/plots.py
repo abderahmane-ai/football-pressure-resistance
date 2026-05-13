@@ -36,10 +36,8 @@ def plot_prs_leaderboard():
     plt.axvline(0, color='grey', linestyle='--', alpha=0.5)
     plt.axhline(0, color='grey', linestyle='--', alpha=0.5)
     
-    plt.title('Pressure Resistance: Turnover Risk vs. Value Retention\n(Top 30 Players)', fontsize=14)
-    # Note: Turnover risk is plotted such that positive is BAD or GOOD?
-    # In the inference script: 'mean_Turnover_Risk_Score': -row['mean']
-    # So a higher Turnover Risk Score means they are BETTER (less likely to turnover). Let's relabel it to 'Ball Security'.
+    # mean_Turnover_Risk_Score = -theta_succ; higher = better ball security
+    plt.title('Pressure Resistance: Ball Security vs. Value Retention (Top 30)', fontsize=14)
     plt.xlabel('Ball Security under Pressure (Higher = Keeps possession)', fontsize=12)
     plt.ylabel('Value Retention (Higher = More dangerous when successful)', fontsize=12)
     plt.legend(title="Position", loc='upper left')
@@ -57,14 +55,12 @@ def plot_feature_importance():
     if df.empty:
         return
     
-    # Separate the two models based on index naming
     df_turnover = df[df.index.str.contains('_turnover_risk')].copy()
     df_value = df[df.index.str.contains('_value_retention')].copy()
     
     df_turnover.index = df_turnover.index.str.replace('_turnover_risk', '')
     df_value.index = df_value.index.str.replace('_value_retention', '')
     
-    # Sort by absolute mean in turnover
     df_turnover = df_turnover.sort_values(by='abs_mean', ascending=True)
     features = df_turnover.index
     df_value = df_value.reindex(features)

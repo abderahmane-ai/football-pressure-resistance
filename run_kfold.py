@@ -6,28 +6,27 @@ from pathlib import Path
 import time
 import logging
 
-# Professional logging setup
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 COMPS = ["Euro_2020", "Euro_2024", "World_Cup_2022", "Bundesliga_2024"]
 
 def check_optimization():
-    """Checks if hardware-accelerated sampling is available and advises the user."""
+    """Warn if JAX/NumPyro is unavailable; fall back to PyMC default sampler."""
     try:
+        # pyrefly: ignore [missing-import]
         import numpyro
+        # pyrefly: ignore [missing-import]
         import jax
-        logger.info("Optimization: JAX/NumPyro is INSTALLED. MCMC sampling will be hardware-accelerated.")
+        logger.info("JAX/NumPyro available — MCMC will be hardware-accelerated.")
     except ImportError:
-        logger.warning("Optimization: JAX/NumPyro is NOT installed.")
-        logger.warning("For professional, optimized performance (minutes instead of hours), please run:")
-        logger.warning("    pip install numpyro jax jaxlib")
-        logger.warning("The script will proceed using the default PyMC Python sampler (which is significantly slower).")
-        logger.warning("Sleeping for 5 seconds before starting...")
+        logger.warning("JAX/NumPyro not installed. Sampling will be significantly slower.")
+        logger.warning("Install with: pip install numpyro jax jaxlib")
+        logger.warning("Continuing in 5 seconds...")
         time.sleep(5)
 
 def run_step(step_cmd, env):
-    """Executes a pipeline step and streams output natively."""
+    """Run a pipeline subprocess; exit on non-zero return code."""
     process = subprocess.Popen(step_cmd, env=env, stdout=sys.stdout, stderr=subprocess.STDOUT)
     process.communicate()
     if process.returncode != 0:
@@ -45,9 +44,8 @@ def main():
         logger.info(f"FOLD {fold + 1}/4: Holdout = {holdout}")
         logger.info(f"{'='*60}")
         
-        # Dynamically inject the holdout dataset into the environment
         env = os.environ.copy()
-        env["PRS_HOLDOUT"] = holdout
+        env["PRS_HOLDOUT"] = holdout  # Inject holdout fold
         
         steps = [
             ["python3", "-m", "src.data.builder"],
@@ -64,7 +62,6 @@ def main():
         fold_time = time.time() - start_time
         logger.info(f"Fold {fold + 1} completed in {fold_time / 60:.1f} minutes.")
         
-        # Extract and record metrics
         metrics_file = Path("outputs/tables/holdout_metrics.csv")
         if metrics_file.exists():
             df = pd.read_csv(metrics_file)
@@ -95,10 +92,9 @@ def main():
     
     logger.info(f"Mean Pearson Correlation: {mean_pearson:.3f} (Range: {pearson_min:.3f} - {pearson_max:.3f})")
     
-    # Save aggregate results
     Path("outputs/tables").mkdir(parents=True, exist_ok=True)
     res_df.to_csv("outputs/tables/kfold_results.csv", index=False)
-    logger.info("Comprehensive results saved to outputs/tables/kfold_results.csv")
+    logger.info("Results saved to outputs/tables/kfold_results.csv")
 
 if __name__ == "__main__":
     main()

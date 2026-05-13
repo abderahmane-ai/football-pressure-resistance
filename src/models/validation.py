@@ -6,7 +6,7 @@ from scipy.special import expit
 import logging
 import pickle
 import arviz as az
-from config import TABLES_DIR, MODEL_TRACES_DIR, PROCESSED_DATA_DIR, SPATIAL_CONFIG
+from config import TABLES_DIR, MODEL_TRACES_DIR, PROCESSED_DATA_DIR, SPATIAL_CONFIG, MIN_EVENTS_THRESHOLD
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -48,6 +48,16 @@ def run_cross_validation():
     alpha_val = post['alpha_val'].values.flatten()
     beta_val = post['beta_val'].values.reshape(-1, len(feature_names))
     gamma_pos_val = post['gamma_pos_val'].values.reshape(-1, len(pos_mapping))
+
+    # Marginalise opp/comp by posterior group mean — consistent with leaderboard
+    delta_opp_succ = post['delta_opp_succ'].values.reshape(-1, post['delta_opp_succ'].shape[-1])
+    zeta_comp_succ = post['zeta_comp_succ'].values.reshape(-1, post['zeta_comp_succ'].shape[-1])
+    delta_opp_val  = post['delta_opp_val'].values.reshape(-1, post['delta_opp_val'].shape[-1])
+    zeta_comp_val  = post['zeta_comp_val'].values.reshape(-1, post['zeta_comp_val'].shape[-1])
+    mean_opp_succ  = delta_opp_succ.mean(axis=1)  # (n_samples,)
+    mean_comp_succ = zeta_comp_succ.mean(axis=1)
+    mean_opp_val   = delta_opp_val.mean(axis=1)
+    mean_comp_val  = zeta_comp_val.mean(axis=1)
     
     X_holdout = holdout_df[feature_names].values
     X_holdout_scaled = scaler.transform(X_holdout)
@@ -55,13 +65,17 @@ def run_cross_validation():
     rev_pos_mapping = {v: k for k, v in pos_mapping.items()}
     holdout_pos_codes = holdout_df['position_group'].map(rev_pos_mapping).fillna(rev_pos_mapping.get('Midfielder', 0)).astype(int).values
     
-    # Vectorized computation
+    # Vectorised linear predictors
     logit_succ_base = alpha_succ[:, np.newaxis] + np.dot(beta_succ, X_holdout_scaled.T)
     logit_val_base = alpha_val[:, np.newaxis] + np.dot(beta_val, X_holdout_scaled.T)
-    
-    # Add position effects fully vectorized
+
+    # Position effects
     logit_succ_base += gamma_pos_succ[:, holdout_pos_codes]
     logit_val_base += gamma_pos_val[:, holdout_pos_codes]
+
+    # Marginalised opp/comp effects
+    logit_succ_base += mean_opp_succ[:, np.newaxis] + mean_comp_succ[:, np.newaxis]
+    logit_val_base  += mean_opp_val[:, np.newaxis]  + mean_comp_val[:, np.newaxis]
         
     p_succ = expit(logit_succ_base)
     mu_val = expit(logit_val_base) * max_value
@@ -79,7 +93,7 @@ def run_cross_validation():
         'value_preserved': 'count',
         'player_name': 'first'
     }).reset_index()
-    player_stats = player_stats[player_stats['value_preserved'] >= 20]
+    player_stats = player_stats[player_stats['value_preserved'] >= MIN_EVENTS_THRESHOLD]
     
     train_lb = pd.read_csv(TABLES_DIR / "prs_leaderboard.csv")
     merged = train_lb.merge(player_stats, on='player_id', suffixes=('_train', '_holdout'))

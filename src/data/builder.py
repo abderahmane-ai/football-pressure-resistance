@@ -1,5 +1,6 @@
 import logging
 import os
+import traceback
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -38,7 +39,9 @@ def compute_game_state_for_match(match_events):
         event_state[event_id] = score.get(team, 0) - score.get(opp, 0)
 
         ev_type = row.get('type', '')
-        if ev_type == 'Shot' and row.get('shot_outcome') == 'Goal':
+        # Fallback handles both statsbombpy column name variants
+        shot_outcome = row.get('shot_outcome') or row.get('shot_outcome_name', '')
+        if ev_type == 'Shot' and shot_outcome == 'Goal':
             score[team] = score.get(team, 0) + 1
         elif ev_type == 'Own Goal For':
             score[team] = score.get(team, 0) + 1
@@ -109,7 +112,9 @@ def _process_single_match(args):
             row.update(features)
             rows.append(row)
     except Exception as e:
-        logger.warning(f"Match {match_id} worker failed: {e}")
+        logger.warning(f"Match {match_id} worker failed: {e}\n{traceback.format_exc()}")
+    if not rows:
+        logger.warning(f"Match {match_id}: worker produced 0 rows — all events filtered or no pressure events found")
     return rows
 
 

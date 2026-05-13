@@ -4,7 +4,7 @@ import arviz as az
 import pickle
 import logging
 from scipy.special import expit
-from config import MODEL_TRACES_DIR, TABLES_DIR, PROCESSED_DATA_DIR, SPATIAL_CONFIG
+from config import MODEL_TRACES_DIR, TABLES_DIR, PROCESSED_DATA_DIR, SPATIAL_CONFIG, MIN_EVENTS_THRESHOLD
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -53,14 +53,14 @@ def run_posterior_analysis():
     theta_val = post['theta_val'].values.reshape(-1, len(player_mapping))
     gamma_pos_val = post['gamma_pos_val'].values.reshape(-1, len(pos_mapping))
     
-    # Load opponent and competition posterior effects for marginalisation
+    # Opponent and competition posterior effects
     delta_opp_succ = post['delta_opp_succ'].values.reshape(-1, post['delta_opp_succ'].shape[-1])
     zeta_comp_succ = post['zeta_comp_succ'].values.reshape(-1, post['zeta_comp_succ'].shape[-1])
     delta_opp_val  = post['delta_opp_val'].values.reshape(-1, post['delta_opp_val'].shape[-1])
     zeta_comp_val  = post['zeta_comp_val'].values.reshape(-1, post['zeta_comp_val'].shape[-1])
     
-    # Marginalise opponent/competition effects by using their posterior mean across all groups
-    mean_opp_succ  = delta_opp_succ.mean(axis=1)   # shape: (n_samples,)
+    # Marginalise by posterior group mean; shape: (n_samples,)
+    mean_opp_succ  = delta_opp_succ.mean(axis=1)
     mean_comp_succ = zeta_comp_succ.mean(axis=1)
     mean_opp_val   = delta_opp_val.mean(axis=1)
     mean_comp_val  = zeta_comp_val.mean(axis=1)
@@ -83,11 +83,10 @@ def run_posterior_analysis():
         for f_name, val in s.items():
             if f_name in feature_names:
                 f_idx = feature_names.index(f_name)
-                # To prevent binary features from taking mean value, we keep them at 0
                 if f_name not in ['opps_within_1yd', 'opps_within_2yd', 'opps_within_4yd', 'has_progressive_option']:
                     vec[f_idx] = (val - scaler.mean_[f_idx]) / scaler.scale_[f_idx]
                 else:
-                    # For binary or integer counts, we use actual 0 standard scaled
+                    # Binary/count features: use 0, not scaled mean
                     vec[f_idx] = (0 - scaler.mean_[f_idx]) / scaler.scale_[f_idx]
         scenario_vectors[name] = vec
     
@@ -128,7 +127,7 @@ def run_posterior_analysis():
             player_id = player_mapping[idx_num]
             
             n_events = event_counts.get(player_id, 0)
-            if n_events < 20:
+            if n_events < MIN_EVENTS_THRESHOLD:
                 continue
             
             player_name = name_lookup.get(player_id, f"ID: {player_id}")

@@ -1,47 +1,160 @@
-# Python bytecode
+# ─────────────────────────────────────────────
+# Python
+# ─────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
 *.pyc
+*.pdb
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+*.so
+*.dylib
+MANIFEST
+pip-wheel-metadata/
 
-# Virtual environments
+# ─────────────────────────────────────────────
+# Virtual Environments
+# ─────────────────────────────────────────────
 .venv/
 venv/
 env/
 ENV/
+.conda/
+conda-env/
 
-# IDE
+# ─────────────────────────────────────────────
+# IDE / Editor
+# ─────────────────────────────────────────────
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
+.project
+.pydevproject
+*.sublime-project
+*.sublime-workspace
 
+# ─────────────────────────────────────────────
 # OS
+# ─────────────────────────────────────────────
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
+desktop.ini
 
+# ─────────────────────────────────────────────
 # Jupyter
+# ─────────────────────────────────────────────
 .ipynb_checkpoints/
+*.ipynb
 
-# Testing
+# ─────────────────────────────────────────────
+# Testing & Coverage
+# ─────────────────────────────────────────────
 .pytest_cache/
 .coverage
+.coverage.*
 htmlcov/
 .tox/
+coverage.xml
+*.coveragerc
 
-# Outputs (generated files)
-outputs/
-*.log
+# ─────────────────────────────────────────────
+# Type Checking
+# ─────────────────────────────────────────────
+.mypy_cache/
+.pytype/
+.pyre/
 
-# Data directories (typically large, regenerated from raw)
+# ─────────────────────────────────────────────
+# Data — Raw & Processed (large, regenerated)
+# ─────────────────────────────────────────────
 data/raw/
 data/processed/
 
-# Environment variables
-.env
+# ─────────────────────────────────────────────
+# Model Outputs (large generated artifacts)
+# ─────────────────────────────────────────────
+outputs/model_traces/
+outputs/figures/
+outputs/tables/
 
-# Temporary files
+# Keep the outputs directory itself in git
+!outputs/.gitkeep
+
+# ─────────────────────────────────────────────
+# Pickle / Binary Model Artifacts
+# ─────────────────────────────────────────────
+*.pkl
+*.pickle
+*.joblib
+
+# ─────────────────────────────────────────────
+# NetCDF / ArviZ Trace Files (very large)
+# ─────────────────────────────────────────────
+*.nc
+*.netcdf
+*.zarr
+
+# ─────────────────────────────────────────────
+# Parquet / Arrow Data Files
+# ─────────────────────────────────────────────
+*.parquet
+*.arrow
+*.feather
+
+# ─────────────────────────────────────────────
+# Logs
+# ─────────────────────────────────────────────
+*.log
+logs/
+*.out
+
+# ─────────────────────────────────────────────
+# Environment Variables / Secrets
+# ─────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ─────────────────────────────────────────────
+# Temporary / Scratch
+# ─────────────────────────────────────────────
 *.tmp
+*.temp
 temp/
+tmp/
+scratch/
+
+# ─────────────────────────────────────────────
+# llama.cpp (submodule / build artifacts)
+# ─────────────────────────────────────────────
+llama.cpp/build/
+llama.cpp/*.o
+llama.cpp/*.a
+llama.cpp/models/
+
+# ─────────────────────────────────────────────
+# JAX / XLA Cache
+# ─────────────────────────────────────────────
+.jax_cache/
+jax_cache/
+__jax_traceback__/
+
+# ─────────────────────────────────────────────
+# NumPyro / PyMC Sampling Cache
+# ─────────────────────────────────────────────
+.numpyro_cache/
+pymc_cache/
