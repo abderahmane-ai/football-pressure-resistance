@@ -1,7 +1,6 @@
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
-import numpy as np
 from config import TABLES_DIR, FIGURES_DIR
 import logging
 
@@ -14,48 +13,79 @@ except AttributeError:
     sns.set_style("whitegrid")
 
 def plot_prs_leaderboard():
-    """Plot Top 20 PRS leaderboard with role and scenario info."""
+    """Plot Top players on a 2D plane: Turnover Risk vs Value Retention."""
     path = TABLES_DIR / "prs_leaderboard.csv"
     if not path.exists(): return
     
-    df = pd.read_csv(path).head(20)
-    plt.figure(figsize=(12, 10))
+    df = pd.read_csv(path)
+    if df.empty:
+        return
     
-    # Plot error bars
-    plt.errorbar(x=df['mean_PRS'], y=df['player_name'], 
-                 xerr=[df['mean_PRS'] - df['hdi_5%'], df['hdi_95%'] - df['mean_PRS']],
-                 fmt='o', color='royalblue', ecolor='lightsteelblue', capsize=3, label='PRS (mean ± 90% HDI)')
+    # Take top 30 by combined PRS
+    df = df.head(30)
     
-    # Add scenario labels
-    for i, (_, row) in enumerate(df.iterrows()):
-        plt.text(row['hdi_95%'] + 0.002, i, f"[{row['position_group'][0]} | {row['best_under_scenario']}]", 
-                 va='center', fontsize=9, color='grey')
+    plt.figure(figsize=(10, 10))
+    
+    sns.scatterplot(data=df, x='mean_Turnover_Risk_Score', y='mean_Value_Retention_Score', 
+                    hue='position_group', s=100, alpha=0.8, palette='Set1')
+    
+    for i, row in df.iterrows():
+        plt.text(row['mean_Turnover_Risk_Score'] + 0.005, row['mean_Value_Retention_Score'], 
+                 row['player_name'], fontsize=9)
         
-    plt.axvline(0, color='crimson', linestyle='--', alpha=0.6)
-    plt.title('Pressure Resistance Score: Expected Value Gain per 360 Dual\nTop 20 Players (Min. 20 Duals)', fontsize=14)
-    plt.xlabel('PRS (Expected xT Gain above Population Baseline)', fontsize=12)
-    plt.ylabel('Player', fontsize=12)
-    plt.legend(loc='lower right')
+    plt.axvline(0, color='grey', linestyle='--', alpha=0.5)
+    plt.axhline(0, color='grey', linestyle='--', alpha=0.5)
+    
+    plt.title('Pressure Resistance: Turnover Risk vs. Value Retention\n(Top 30 Players)', fontsize=14)
+    # Note: Turnover risk is plotted such that positive is BAD or GOOD?
+    # In the inference script: 'mean_Turnover_Risk_Score': -row['mean']
+    # So a higher Turnover Risk Score means they are BETTER (less likely to turnover). Let's relabel it to 'Ball Security'.
+    plt.xlabel('Ball Security under Pressure (Higher = Keeps possession)', fontsize=12)
+    plt.ylabel('Value Retention (Higher = More dangerous when successful)', fontsize=12)
+    plt.legend(title="Position", loc='upper left')
     plt.tight_layout()
-    plt.savefig(FIGURES_DIR / "1_leaderboard.png", dpi=300)
+    plt.savefig(FIGURES_DIR / "1_leaderboard_2D.png", dpi=300)
     plt.close()
-    logger.info("Saved Leaderboard plot.")
+    logger.info("Saved 2D Leaderboard plot.")
 
 def plot_feature_importance():
-    """Plot standardized coefficients (Beta) for spatial features."""
+    """Plot standardized coefficients for spatial features (Turnover vs Value)."""
     path = TABLES_DIR / "feature_importance.csv"
     if not path.exists(): return
     
-    df = pd.read_csv(path, index_col=0).sort_values(by='mean', ascending=True)
-    plt.figure(figsize=(10, 8))
+    df = pd.read_csv(path, index_col=0)
+    if df.empty:
+        return
     
-    colors = ['crimson' if x < 0 else 'forestgreen' for x in df['mean']]
-    plt.barh(df.index, df['mean'], xerr=[df['mean'] - df['hdi_5%'], df['hdi_95%'] - df['mean']], 
-             color=colors, alpha=0.7, ecolor='grey')
+    # Separate the two models based on index naming
+    df_turnover = df[df.index.str.contains('_turnover_risk')].copy()
+    df_value = df[df.index.str.contains('_value_retention')].copy()
     
-    plt.axvline(0, color='black', lw=1)
-    plt.title('Which Spatial Factors Degrade Composure?\nBayesian Standardized Coefficients (Fixed Effects)', fontsize=13)
-    plt.xlabel('Effect on Value Preserved (Standardized Beta)', fontsize=11)
+    df_turnover.index = df_turnover.index.str.replace('_turnover_risk', '')
+    df_value.index = df_value.index.str.replace('_value_retention', '')
+    
+    # Sort by absolute mean in turnover
+    df_turnover = df_turnover.sort_values(by='abs_mean', ascending=True)
+    features = df_turnover.index
+    df_value = df_value.reindex(features)
+    
+    fig, axes = plt.subplots(1, 2, figsize=(14, 8), sharey=True)
+    
+    colors_turn = ['crimson' if x < 0 else 'forestgreen' for x in df_turnover['mean']]
+    axes[0].barh(df_turnover.index, df_turnover['mean'], 
+                 xerr=[df_turnover['mean'] - df_turnover['hdi_5%'], df_turnover['hdi_95%'] - df_turnover['mean']], 
+                 color=colors_turn, alpha=0.7)
+    axes[0].axvline(0, color='black', lw=1)
+    axes[0].set_title('Effect on Ball Security (Turnover Risk)', fontsize=12)
+    
+    colors_val = ['crimson' if x < 0 else 'forestgreen' for x in df_value['mean']]
+    axes[1].barh(df_value.index, df_value['mean'], 
+                 xerr=[df_value['mean'] - df_value['hdi_5%'], df_value['hdi_95%'] - df_value['mean']], 
+                 color=colors_val, alpha=0.7)
+    axes[1].axvline(0, color='black', lw=1)
+    axes[1].set_title('Effect on Value Retention', fontsize=12)
+    
+    fig.suptitle('Which Spatial Factors Impact Composure?\nBayesian Standardized Coefficients', fontsize=14)
     plt.tight_layout()
     plt.savefig(FIGURES_DIR / "2_feature_importance.png", dpi=300)
     plt.close()
@@ -67,13 +97,15 @@ def plot_stability_analysis():
     if not path.exists(): return
     
     df = pd.read_csv(path)
+    if df.empty:
+        return
+    
     plt.figure(figsize=(9, 8))
     
     sns.regplot(data=df, x='mean_PRS', y='residual', 
                 scatter_kws={'alpha':0.5, 'color':'royalblue'}, 
                 line_kws={'color':'crimson', 'ls':'--'})
     
-    # Label top 5 training players
     top_players = df.sort_values(by='mean_PRS', ascending=False).head(5)
     for _, row in top_players.iterrows():
         plt.text(row['mean_PRS'] + 0.001, row['residual'], row['player_name_train'], fontsize=9)
@@ -83,11 +115,10 @@ def plot_stability_analysis():
     
     from config import CROSS_VALIDATION_HOLDOUT
     holdout_name = CROSS_VALIDATION_HOLDOUT.replace("_", " ")
-    plt.title(f'Cross-Tournament Stability Proof\nTraining PRS vs {holdout_name} Holdout Residuals', fontsize=13)
-    plt.xlabel('Training PRS (Estimated Composure Bonus)', fontsize=11)
+    plt.title(f'Cross-Tournament Stability Proof\nTraining Combined PRS vs {holdout_name} Holdout Residuals', fontsize=13)
+    plt.xlabel('Training Combined PRS (Expected xT Gain)', fontsize=11)
     plt.ylabel('Holdout Residual (Actual Value Gain above Predicted)', fontsize=11)
     
-    # Annotation
     corr_path = TABLES_DIR / "holdout_metrics.csv"
     if corr_path.exists():
         metrics = pd.read_csv(corr_path).iloc[0]

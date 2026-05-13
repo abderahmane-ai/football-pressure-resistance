@@ -1,80 +1,96 @@
 import numpy as np
-from scipy.spatial import Voronoi
-from shapely.geometry import Polygon, Point
+from shapely.geometry import Polygon, Point, LineString
 from shapely.ops import voronoi_diagram
 
-def point_in_pitch(x, y, pitch_dims=(120.0, 80.0)):
+from config import SPATIAL_CONFIG
+
+def point_in_pitch(x, y):
     """Check if a point is within the pitch dimensions."""
-    return 0 <= x <= pitch_dims[0] and 0 <= y <= pitch_dims[1]
+    return 0 <= x <= SPATIAL_CONFIG['pitch_length'] and 0 <= y <= SPATIAL_CONFIG['pitch_width']
+
+def _gaussian_influence(point, players, max_radius=15.0):
+    """
+    Compute Gaussian influence of a list of players at a specific point.
+    """
+    if len(players) == 0:
+        return 0.0
+    players = np.array(players)
+    dists = np.linalg.norm(players - point, axis=1)
+    # Only consider players within max_radius
+    close_mask = dists <= max_radius
+    if not np.any(close_mask):
+        return 0.0
+    close_dists = dists[close_mask]
+    sigma = SPATIAL_CONFIG['pitch_control_sigma']  # Fernandez/Bornn: 4.2 yards
+    influence = np.sum(np.exp(-(close_dists**2) / (2 * sigma**2)))
+    return influence
 
 def pitch_control_value(bc, teammates, opponents):
     """
-    Simple additive pitch control model at ball-carrier location.
-    Returns value in [-1, 1] range.
+    Gaussian pitch control model at ball-carrier location.
+    Returns value in [-1, 1] range representing net control.
     """
     bc = np.array(bc)
+    tm_influence = _gaussian_influence(bc, teammates)
+    opp_influence = _gaussian_influence(bc, opponents)
     
-    tm_influence = 0.0
-    if len(teammates) > 0:
-        tms = np.array(teammates)
-        tm_dists_sq = np.sum((tms - bc)**2, axis=1)
-        tm_influence = np.sum(1.0 / (1.0 + tm_dists_sq))
-    
-    opp_influence = 0.0
-    if len(opponents) > 0:
-        opps = np.array(opponents)
-        opp_dists_sq = np.sum((opps - bc)**2, axis=1)
-        opp_influence = np.sum(1.0 / (1.0 + opp_dists_sq))
-    
-    pc_value = tm_influence - opp_influence
-    return np.clip(pc_value, -1.0, 1.0)
+    total = tm_influence + opp_influence
+    if total == 0:
+        return 0.0
+        
+    pc_prob = tm_influence / total
+    # Scale to [-1, 1]
+    return (pc_prob * 2) - 1.0
+
+# Authentic Karun Singh xT grid values
+XT_GRID_VALUES = np.array([
+    [0.00638, 0.00779, 0.00844, 0.00977, 0.01126, 0.01248, 0.01473, 0.01745, 0.02122, 0.02756, 0.03485, 0.03792],
+    [0.00681, 0.00878, 0.00942, 0.01121, 0.01237, 0.01288, 0.01552, 0.01918, 0.02412, 0.03401, 0.04647, 0.05401],
+    [0.00750, 0.00941, 0.01078, 0.01258, 0.01406, 0.01579, 0.01890, 0.02410, 0.03107, 0.04618, 0.06456, 0.07409],
+    [0.00793, 0.00938, 0.01124, 0.01357, 0.01479, 0.01692, 0.02058, 0.02636, 0.03328, 0.05051, 0.07604, 0.09327],
+    [0.00793, 0.00938, 0.01124, 0.01357, 0.01479, 0.01692, 0.02058, 0.02636, 0.03328, 0.05051, 0.07604, 0.09327],
+    [0.00750, 0.00941, 0.01078, 0.01258, 0.01406, 0.01579, 0.01890, 0.02410, 0.03107, 0.04618, 0.06456, 0.07409],
+    [0.00681, 0.00878, 0.00942, 0.01121, 0.01237, 0.01288, 0.01552, 0.01918, 0.02412, 0.03401, 0.04647, 0.05401],
+    [0.00638, 0.00779, 0.00844, 0.00977, 0.01126, 0.01248, 0.01473, 0.01745, 0.02122, 0.02756, 0.03485, 0.03792]
+])
 
 def xt_value(x, y):
     """
-    Expected threat grid (12x8) based on Karun Singh's model.
-    Simplified version with higher values closer to goal.
+    Expected threat grid based on Karun Singh's model.
     """
-    # 12 zones along x (0-120), 8 zones along y (0-80)
-    x_idx = int(np.clip(x / 10.0, 0, 11))
-    y_idx = int(np.clip(y / 10.0, 0, 7))
+    pitch_len = SPATIAL_CONFIG['pitch_length']
+    pitch_wid = SPATIAL_CONFIG['pitch_width']
+    cols = SPATIAL_CONFIG['xt_grid_cols']
+    rows = SPATIAL_CONFIG['xt_grid_rows']
     
-    # Simplified xT grid (higher values near opponent goal)
-    xt_grid = np.array([
-        [0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.01, 0.02, 0.05],
-        [0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.01, 0.01, 0.01, 0.02, 0.04, 0.08],
-        [0.00, 0.00, 0.00, 0.00, 0.01, 0.01, 0.01, 0.02, 0.02, 0.03, 0.06, 0.12],
-        [0.00, 0.00, 0.00, 0.01, 0.01, 0.01, 0.02, 0.02, 0.03, 0.04, 0.08, 0.15],
-        [0.00, 0.00, 0.00, 0.01, 0.01, 0.01, 0.02, 0.02, 0.03, 0.04, 0.08, 0.15],
-        [0.00, 0.00, 0.00, 0.00, 0.01, 0.01, 0.01, 0.02, 0.02, 0.03, 0.06, 0.12],
-        [0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.01, 0.01, 0.01, 0.02, 0.04, 0.08],
-        [0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.01, 0.02, 0.05],
-    ])
+    x_idx = int(np.clip((x / pitch_len) * cols, 0, cols - 1))
+    y_idx = int(np.clip((y / pitch_wid) * rows, 0, rows - 1))
     
-    return xt_grid[y_idx, x_idx]
+    return XT_GRID_VALUES[y_idx, x_idx]
 
-def voronoi_area(ball_carrier, all_players, pitch_dims=(120.0, 80.0)):
+def voronoi_area(ball_carrier, all_players):
     """
     Calculate the area of the Voronoi cell for the ball carrier, clipped to the pitch.
     """
+    pitch_len = SPATIAL_CONFIG['pitch_length']
+    pitch_wid = SPATIAL_CONFIG['pitch_width']
+    
     pitch_polygon = Polygon([
-        (0, 0), (pitch_dims[0], 0), 
-        (pitch_dims[0], pitch_dims[1]), (0, pitch_dims[1])
+        (0, 0), (pitch_len, 0), 
+        (pitch_len, pitch_wid), (0, pitch_wid)
     ])
     
     points = np.array(all_players)
-    if len(points) < 4: # Voronoi needs at least 4 points to be well defined usually, or at least 3
-        # Approximate with a grid if too few players
-        return _grid_voronoi_area(ball_carrier, all_players, pitch_dims)
+    if len(points) < 4:
+        return _grid_voronoi_area(ball_carrier, all_players)
         
-    # We use Shapely to create the Voronoi diagram
     from shapely.geometry import MultiPoint
     mp = MultiPoint(points)
     
-    # It might fail if points are collinear, fallback to grid
     try:
         regions = voronoi_diagram(mp, envelope=pitch_polygon)
     except Exception:
-        return _grid_voronoi_area(ball_carrier, all_players, pitch_dims)
+        return _grid_voronoi_area(ball_carrier, all_players)
         
     bc_point = Point(ball_carrier)
     for polygon in regions.geoms:
@@ -84,18 +100,21 @@ def voronoi_area(ball_carrier, all_players, pitch_dims=(120.0, 80.0)):
             
     return 0.0
 
-def _grid_voronoi_area(ball_carrier, all_players, pitch_dims=(120.0, 80.0)):
+def _grid_voronoi_area(ball_carrier, all_players):
     """Grid-based approximation if Shapely fails or few points."""
+    pitch_len = SPATIAL_CONFIG['pitch_length']
+    pitch_wid = SPATIAL_CONFIG['pitch_width']
     grid_res = 1.0
-    xs = np.arange(0, pitch_dims[0], grid_res)
-    ys = np.arange(0, pitch_dims[1], grid_res)
+    
+    xs = np.arange(0, pitch_len, grid_res)
+    ys = np.arange(0, pitch_wid, grid_res)
     xx, yy = np.meshgrid(xs, ys)
     
     grid_points = np.c_[xx.ravel(), yy.ravel()]
     
     all_players = np.array(all_players)
     if len(all_players) == 0:
-        return pitch_dims[0] * pitch_dims[1]
+        return pitch_len * pitch_wid
         
     distances = np.linalg.norm(grid_points[:, np.newaxis, :] - all_players[np.newaxis, :, :], axis=2)
     closest_player_idx = np.argmin(distances, axis=1)
@@ -112,7 +131,7 @@ def _grid_voronoi_area(ball_carrier, all_players, pitch_dims=(120.0, 80.0)):
     bc_area = np.sum(closest_player_idx == bc_idx) * (grid_res ** 2)
     return bc_area
 
-def angular_span(ball_carrier, opponents, radius=3.0):
+def angular_span(ball_carrier, opponents, radius):
     """
     Calculate the angular span (coverage arc) of opponents within a certain radius.
     """
@@ -128,11 +147,16 @@ def angular_span(ball_carrier, opponents, radius=3.0):
     if len(close_opps) == 0:
         return 0.0
         
+    # Note: arctan2 signature is (y, x). The previous code used (y, x).
     angles = np.arctan2(close_opps[:, 1] - bc[1], close_opps[:, 0] - bc[0])
     
     angles = np.sort(angles)
     if len(angles) == 1:
-        return 0.5 # Default width for a single player
+        # Principled trigonometric formula from methodology: 2 * arctan(player_width/2 / distance)
+        dist = distances[distances <= radius][0]
+        dist = max(dist, 0.01)  # Guard against division by zero
+        player_width = SPATIAL_CONFIG['player_width']
+        return 2.0 * np.arctan((player_width / 2.0) / dist)
         
     angles_wrapped = np.append(angles, angles[0] + 2 * np.pi)
     gaps = np.diff(angles_wrapped)
@@ -140,3 +164,20 @@ def angular_span(ball_carrier, opponents, radius=3.0):
     
     span = 2 * np.pi - max_gap
     return span
+
+def lane_unblocked(start_point, end_point, opponents, clearance_radius=None):
+    """
+    Check if a passing lane from start to end is unblocked by opponents.
+    """
+    if clearance_radius is None:
+        clearance_radius = SPATIAL_CONFIG['pass_clearance_radius']
+        
+    if len(opponents) == 0:
+        return True
+    
+    lane = LineString([start_point, end_point])
+    for opp in opponents:
+        opp_point = Point(opp)
+        if lane.distance(opp_point) <= clearance_radius:
+            return False
+    return True

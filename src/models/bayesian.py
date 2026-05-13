@@ -1,13 +1,11 @@
 import logging
 import pandas as pd
 import numpy as np
-import warnings
-warnings.simplefilter(action='ignore', category=FutureWarning)
 import pymc as pm
-import arviz as az
-from pathlib import Path
 from sklearn.preprocessing import StandardScaler
 import pickle
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
 
 from config import PROCESSED_DATA_DIR, MODEL_TRACES_DIR, MODEL_SETTINGS
 
@@ -16,55 +14,42 @@ logger = logging.getLogger(__name__)
 
 def fit_pooled_model():
     """
-    Fit the pooled hierarchical Beta regression model with value_preserved outcome.
+    Fit a Zero-Inflated (Hurdle) model separating Turnover Risk from Value Retention.
     """
     dataset_path = PROCESSED_DATA_DIR / "all_pressure_dataset.parquet"
     if not dataset_path.exists():
-        logger.error(f"Dataset {dataset_path} not found. Run build_dataset.py first.")
+        logger.error(f"Dataset {dataset_path} not found.")
         return None
         
     df = pd.read_parquet(dataset_path)
     df = df.dropna()
     
     logger.info(f"Loaded dataset: {len(df)} observations")
-    logger.info(f"Competitions: {df['competition'].unique()}")
-    logger.info(f"Unique players: {df['player_id'].nunique()}")
-    logger.info(f"Position groups: {df['position_group'].value_counts().to_dict()}")
     
-    # Select features
     feature_cols = [
-        'dist_nearest_opp', 'dist_2nd_nearest_opp', 'opps_within_1yd', 
-        'opps_within_2yd', 'opps_within_4yd', 'angle_nearest_opp', 
-        'coverage_arc', 'voronoi_area', 'n_free_teammates', 
-        'max_free_triangle_area', 'dist_nearest_free_teammate', 
+        'dist_nearest_opp', 'dist_2nd_nearest_opp', 'opps_within_1yd',
+        'opps_within_2yd', 'opps_within_4yd', 'angle_nearest_opp',
+        'coverage_arc', 'voronoi_area', 'n_free_teammates',
+        'max_free_triangle_area', 'dist_nearest_free_teammate',
         'angle_nearest_free_teammate', 'pitch_control', 'opp_density_5yd',
-        'has_progressive_option', 'xt_value', 'zone', 'game_state_diff',
-        'minutes_elapsed', 'match_period'
+        'has_progressive_option', 'xt_value', 'bc_x', 'bc_y',
+        'game_state_diff', 'minutes_elapsed', 'match_period'
     ]
     
     available_features = [c for c in feature_cols if c in df.columns]
-    logger.info(f"Using {len(available_features)} features")
-    
     X = df[available_features].values
     
-    # Scale value_preserved to (0, 1) for Beta regression
-    # Add small epsilon to avoid exact 0 and 1
-    y_raw = df['value_preserved'].values
-    max_value = y_raw.max()
-    if max_value == 0:
-        max_value = 0.15  # Fallback
+    y_success = df['success'].values.astype(int)
+    y_value = df['value_preserved'].values
+    max_value = y_value.max() if y_value.max() > 0 else 0.15
     
     epsilon = 1e-6
-    y_scaled = (y_raw / max_value) * (1 - 2*epsilon) + epsilon
-    y_scaled = np.clip(y_scaled, epsilon, 1 - epsilon)
+    y_value_scaled = (y_value / max_value) * (1 - 2*epsilon) + epsilon
+    y_value_scaled = np.clip(y_value_scaled, epsilon, 1 - epsilon)
     
-    logger.info(f"Value range: [{y_raw.min():.4f}, {y_raw.max():.4f}] -> [{y_scaled.min():.4f}, {y_scaled.max():.4f}]")
-    
-    # Standardize features
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
     
-    # Save scaler and max_value
     MODEL_TRACES_DIR.mkdir(parents=True, exist_ok=True)
     with open(MODEL_TRACES_DIR / "pooled_scaler.pkl", "wb") as f:
         pickle.dump({
@@ -74,7 +59,6 @@ def fit_pooled_model():
             'epsilon': epsilon
         }, f)
     
-    # Create integer indices for random effects
     player_cats = df['player_id'].astype('category')
     comp_cats = df['competition'].astype('category')
     opp_team_cats = df['opponent_team_id'].astype('category')
@@ -86,12 +70,11 @@ def fit_pooled_model():
     pos_idx = pos_cats.cat.codes.values
     
     n_players = len(player_cats.cat.categories)
-    n_comps = len(comp_cats.cat.categories)
-    n_teams = len(opp_team_cats.cat.categories)
+    n_comp = len(comp_cats.cat.categories)
+    n_opp = len(opp_team_cats.cat.categories)
     n_pos = len(pos_cats.cat.categories)
     n_features = len(available_features)
     
-    # Save mappings
     player_mapping = dict(enumerate(player_cats.cat.categories))
     comp_mapping = dict(enumerate(comp_cats.cat.categories))
     opp_team_mapping = dict(enumerate(opp_team_cats.cat.categories))
@@ -110,60 +93,88 @@ def fit_pooled_model():
             'position_lookup': pos_lookup
         }, f)
         
-    logger.info(f"Model dimensions: {len(df)} obs, {n_players} players, {n_comps} comps, {n_teams} teams, {n_pos} positions, {n_features} features")
+    # Mask for the Value Retention (Beta) model
+    mask = y_success == 1
+    X_val = X_scaled[mask]
+    y_val_scaled = y_value_scaled[mask]
+    player_idx_val = player_idx[mask]
+    comp_idx_val = comp_idx[mask]
+    opp_idx_val = opp_idx[mask]
+    pos_idx_val = pos_idx[mask]
     
-    # Build Beta regression model
-    with pm.Model() as model:
-        # Data containers
-        X_data = pm.Data("X", X_scaled)
-        player_idx_data = pm.Data("player_idx", player_idx)
-        comp_idx_data = pm.Data("comp_idx", comp_idx)
-        opp_idx_data = pm.Data("opp_idx", opp_idx)
-        pos_idx_data = pm.Data("pos_idx", pos_idx)
+    with pm.Model():
+        # --- TURNOVER RISK MODEL (Logistic) ---
+        X_data_succ = pm.Data("X_succ", X_scaled)
+        pid_succ = pm.Data("pid_succ", player_idx)
+        cid_succ = pm.Data("cid_succ", comp_idx)
+        oid_succ = pm.Data("oid_succ", opp_idx)
+        posid_succ = pm.Data("posid_succ", pos_idx)
         
-        # Fixed effects
-        alpha = pm.Normal("alpha", 0, 1.5)
-        beta = pm.Normal("beta", 0, 1.0, shape=n_features)
+        alpha_succ = pm.Normal("alpha_succ", 0, 1.5)
+        beta_succ = pm.Normal("beta_succ", 0, 1.0, shape=n_features)
+        gamma_pos_succ = pm.Normal("gamma_pos_succ", 0, 1.0, shape=n_pos)
         
-        # Position group fixed effect
-        gamma_pos = pm.Normal("gamma_pos", 0, 1.0, shape=n_pos)
+        sigma_theta_succ = pm.Exponential("sigma_theta_succ", 1.0)
+        theta_raw_succ = pm.Normal("theta_raw_succ", 0, 1, shape=n_players)
+        theta_succ = pm.Deterministic("theta_succ", theta_raw_succ * sigma_theta_succ)
         
-        # Player random effect (non-centered)
-        sigma_theta = pm.Exponential("sigma_theta", 1.0)
-        theta_raw = pm.Normal("theta_raw", 0, 1, shape=n_players)
-        theta = pm.Deterministic("theta", theta_raw * sigma_theta)
+        sigma_opp_succ = pm.Exponential("sigma_opp_succ", 1.0)
+        opp_raw_succ = pm.Normal("opp_raw_succ", 0, 1, shape=n_opp)
+        delta_opp_succ = pm.Deterministic("delta_opp_succ", opp_raw_succ * sigma_opp_succ)
         
-        # Competition random effect (non-centered)
-        sigma_comp = pm.Exponential("sigma_comp", 1.0)
-        comp_raw = pm.Normal("comp_raw", 0, 1, shape=n_comps)
-        gamma_comp = pm.Deterministic("gamma_comp", comp_raw * sigma_comp)
+        sigma_comp_succ = pm.Exponential("sigma_comp_succ", 1.0)
+        comp_raw_succ = pm.Normal("comp_raw_succ", 0, 1, shape=n_comp)
+        zeta_comp_succ = pm.Deterministic("zeta_comp_succ", comp_raw_succ * sigma_comp_succ)
         
-        # Opponent team random effect (centered)
-        sigma_delta = pm.Exponential("sigma_delta", 1.0)
-        delta_offset = pm.Normal("delta_offset", 0, sigma=sigma_delta, shape=n_teams)
-        delta = pm.Deterministic("delta", delta_offset - delta_offset.mean())
+        logit_p = (alpha_succ + 
+                   pm.math.dot(X_data_succ, beta_succ) + 
+                   gamma_pos_succ[posid_succ] +
+                   theta_succ[pid_succ] +
+                   delta_opp_succ[oid_succ] +
+                   zeta_comp_succ[cid_succ])
         
-        # Linear predictor
-        logit_mu = (alpha + 
-                    pm.math.dot(X_data, beta) + 
-                    gamma_pos[pos_idx_data] +
-                    theta[player_idx_data] + 
-                    gamma_comp[comp_idx_data] + 
-                    delta[opp_idx_data])
+        p = pm.Deterministic("p", pm.math.invlogit(logit_p))
+        pm.Bernoulli("y_succ_obs", p=p, observed=y_success)
+        
+        # --- VALUE RETENTION MODEL (Beta) ---
+        X_data_val = pm.Data("X_val", X_val)
+        pid_val = pm.Data("pid_val", player_idx_val)
+        cid_val = pm.Data("cid_val", comp_idx_val)
+        oid_val = pm.Data("oid_val", opp_idx_val)
+        posid_val = pm.Data("posid_val", pos_idx_val)
+        
+        alpha_val = pm.Normal("alpha_val", 0, 1.5)
+        beta_val = pm.Normal("beta_val", 0, 1.0, shape=n_features)
+        gamma_pos_val = pm.Normal("gamma_pos_val", 0, 1.0, shape=n_pos)
+        
+        sigma_theta_val = pm.Exponential("sigma_theta_val", 1.0)
+        theta_raw_val = pm.Normal("theta_raw_val", 0, 1, shape=n_players)
+        theta_val = pm.Deterministic("theta_val", theta_raw_val * sigma_theta_val)
+        
+        sigma_opp_val = pm.Exponential("sigma_opp_val", 1.0)
+        opp_raw_val = pm.Normal("opp_raw_val", 0, 1, shape=n_opp)
+        delta_opp_val = pm.Deterministic("delta_opp_val", opp_raw_val * sigma_opp_val)
+        
+        sigma_comp_val = pm.Exponential("sigma_comp_val", 1.0)
+        comp_raw_val = pm.Normal("comp_raw_val", 0, 1, shape=n_comp)
+        zeta_comp_val = pm.Deterministic("zeta_comp_val", comp_raw_val * sigma_comp_val)
+        
+        logit_mu = (alpha_val + 
+                    pm.math.dot(X_data_val, beta_val) + 
+                    gamma_pos_val[posid_val] +
+                    theta_val[pid_val] +
+                    delta_opp_val[oid_val] +
+                    zeta_comp_val[cid_val])
         
         mu = pm.Deterministic("mu", pm.math.invlogit(logit_mu))
+        kappa = pm.Exponential("kappa", 0.1)  # Mean=10; appropriate concentration for Beta regression
         
-        # Beta dispersion parameter
-        kappa = pm.Exponential("kappa", 1.0)
-        
-        # Beta likelihood
         alpha_beta = mu * kappa
         beta_beta = (1 - mu) * kappa
         
-        y_obs = pm.Beta("y", alpha=alpha_beta, beta=beta_beta, observed=y_scaled)
+        pm.Beta("y_val_obs", alpha=alpha_beta, beta=beta_beta, observed=y_val_scaled)
         
-        # Sample
-        logger.info("Starting MCMC sampling with numpyro...")
+        logger.info("Starting MCMC sampling...")
         try:
             trace = pm.sample(
                 draws=MODEL_SETTINGS['draws'],
@@ -176,7 +187,7 @@ def fit_pooled_model():
                 progressbar=True
             )
         except Exception as e:
-            logger.warning(f"numpyro sampling failed: {e}. Falling back to default NUTS.")
+            logger.warning(f"numpyro failed: {e}. Falling back to default NUTS.")
             trace = pm.sample(
                 draws=MODEL_SETTINGS['draws'],
                 tune=MODEL_SETTINGS['tune'],
@@ -187,25 +198,9 @@ def fit_pooled_model():
                 progressbar=True
             )
         
-        # Posterior predictive
-        logger.info("Sampling posterior predictive...")
-        pm.sample_posterior_predictive(trace, extend_inferencedata=True, random_seed=MODEL_SETTINGS['random_seed'])
-        
     trace_path = MODEL_TRACES_DIR / "pooled_trace.nc"
     trace.to_netcdf(trace_path)
     logger.info(f"Saved trace to {trace_path}")
-    
-    # Print diagnostics
-    logger.info("\n=== MODEL DIAGNOSTICS ===")
-    summary = az.summary(trace, var_names=['alpha', 'beta', 'gamma_pos', 'sigma_theta', 'sigma_comp', 'sigma_delta', 'kappa'])
-    logger.info(f"\n{summary}")
-    
-    # Check for divergences
-    divergences = trace.sample_stats.diverging.sum().values
-    logger.info(f"\nDivergences: {divergences}")
-    
-    if divergences > 0:
-        logger.warning(f"Model had {divergences} divergent transitions. Consider increasing target_accept.")
     
     return trace
 

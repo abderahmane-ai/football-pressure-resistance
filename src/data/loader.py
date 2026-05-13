@@ -1,6 +1,5 @@
 import logging
 import warnings
-from pathlib import Path
 import pandas as pd
 from statsbombpy import sb
 from tqdm import tqdm
@@ -86,8 +85,6 @@ def load_all_competitions(competition_names=None):
     
     for comp_name in tqdm(competition_names, desc="Loading competitions"):
         comp_info = COMPETITIONS[comp_name]
-        comp_id = comp_info['comp_id']
-        season_id = comp_info['season_id']
         
         # Load or download events
         events_path = RAW_DATA_DIR / comp_name / "events.parquet"

@@ -13,13 +13,12 @@ TABLES_DIR = OUTPUT_DIR / "tables"
 
 # Competitions (Verified available 360 data)
 COMPETITIONS = {
-    "Bundesliga_2024": {"comp_id": 9, "season_id": 281}, # Germany, 2023/2024, 34 matches
-    "World_Cup_2022": {"comp_id": 43, "season_id": 106}, # International, 2022, 64 matches
-    "Euro_2024": {"comp_id": 55, "season_id": 282},     # Europe, 2024, 51 matches
-    "Euro_2020": {"comp_id": 55, "season_id": 43},      # Europe, 2020, 51 matches
+    "Bundesliga_2024": {"comp_id": 9, "season_id": 281},
+    "World_Cup_2022": {"comp_id": 43, "season_id": 106},
+    "Euro_2024": {"comp_id": 55, "season_id": 282},
+    "Euro_2020": {"comp_id": 55, "season_id": 43},
 }
 
-# Cross-validation holdout (Dynamically set via environment variable, defaults to Euro 2020)
 CROSS_VALIDATION_HOLDOUT = os.environ.get("PRS_HOLDOUT", "Euro_2020")
 
 # Model Settings
@@ -31,3 +30,23 @@ MODEL_SETTINGS = {
     "target_accept": 0.95,
     "nuts_sampler": "numpyro",
 }
+
+# Domain Spatial Constants
+SPATIAL_CONFIG = {
+    "pitch_length": 120.0,
+    "pitch_width": 80.0,
+    "goal_x": 120.0,
+    "goal_y": 40.0,
+    "tight_pressure_radius": 5.0,
+    "coverage_arc_radius": 3.0,
+    "xt_grid_cols": 12,
+    "xt_grid_rows": 8,
+    "pitch_control_sigma": 4.2,
+    "pitch_control_max_radius": 15.0,
+    "player_width": 0.5,
+    "pass_clearance_radius": 1.5,
+    "clear_pass_distance": 2.0,
+    "progressive_distance": 5.0,
+    "carry_lookahead_events": 5,
+}
+

@@ -3,30 +3,31 @@
 A production-grade Bayesian hierarchical framework for evaluating football players' composure under pressure, leveraging StatsBomb 360 freeze-frame data.
 
 ## Overview
-Traditional metrics evaluate passes under pressure but fail to account for the spatial context (e.g., distance to opponents, density, passing angles). The **Pressure Resistance Score (PRS)** uses a **Bayesian Beta Regression Model** to predict the *Expected Threat (xT) preserved* by a player during high-pressure duals. 
+Traditional metrics evaluate passes under pressure but fail to account for the spatial context (e.g., distance to opponents, density, passing angles). The **Pressure Resistance Score (PRS)** uses a **Zero-Inflated Bayesian Hurdle Model** to predict both the *Turnover Risk* (Ball Security) and the *Value Retention* (Expected Threat preserved) by a player during high-pressure duals. 
 
 ### Key Innovations:
-1. **Value-Weighted Outcomes (xT):** We moved from binary success metrics to continuous expected value (Expected Threat). The model evaluates how much offensive value a player preserves when pressured, penalizing safe back-passes that lose ground and rewarding progressive escapes.
-2. **Tight-Pressure Filtering:** Only events where the nearest opponent is within **5 yards** are considered, isolating genuine high-pressure duals and removing "token" pressure.
-3. **Role-Adjusted Fixed Effects:** The model incorporates Position-Group fixed effects (Defender, Midfielder, Forward). PRS therefore measures "Above-Replacement" composure *within a player's specific tactical role*, ensuring midfielders are compared to midfielders.
-4. **Principled Cross-Validation:** Player performance is correlated not just on raw scores, but on their out-of-sample *value-preserved residuals* across different tournaments, proving PRS is a highly stable, scoutable trait.
+1. **Dual-Axis Valuation (Hurdle Model):** We separated the binary outcome (Did they keep the ball?) from the continuous value (How dangerous was the action?). The model evaluates "Ball Security" independently from "Value Retention", identifying players who are safe possession retainers versus high-risk, high-reward progressors.
+2. **Domain-Accurate Spatial Engineering:** Features include Gaussian Pitch Control, which models probabilistic area-ownership using continuous distance-decay functions, and Lane-Aware Progressive Options, ensuring teammates are only considered viable options if the passing lane is unblocked.
+3. **Tight-Pressure Filtering:** Only events where the nearest opponent is within a defined **tight pressure radius** (e.g., 5 yards, driven by spatial configuration) are considered, isolating genuine high-pressure duals and removing "token" pressure.
+4. **Role-Adjusted Fixed Effects:** The model incorporates Position-Group fixed effects (Defender, Midfielder, Forward) dynamically assigned via spatial clustering. PRS therefore measures "Above-Replacement" composure *within a player's specific tactical role*.
+5. **Principled Cross-Validation:** Player performance is correlated not just on raw scores, but on their out-of-sample *expected value residuals* across different tournaments, proving PRS is a highly stable, scoutable trait.
 
 ## Architecture
 
-* **Data Engineering (`src/build_dataset.py`):** Extracts spatial features (Voronoi area, coverage arcs, nearest opponents) from 360° freeze-frames, assigns xT values, excludes goalkeepers, and maps position groups.
-* **Bayesian Model (`src/bayesian_model.py`):** A pooled hierarchical Beta regression.
-  * **Likelihood:** `Beta(mu * kappa, (1-mu) * kappa)`
-  * **Fixed Effects:** Spatial features (Beta) and Position Groups (Gamma).
-  * **Random Effects:** Player Skill ($\theta$, the PRS), Competition context, and Opponent Team defensive quality.
-* **Interpretability (`src/interpretability.py`):** Generates Individual Conditional Expectation (ICE) curves, Marginal Effects, Counterfactuals, and Bayesian Feature Importance. 
-* **Validation (`src/cross_validation.py`):** Calculates out-of-sample stability correlations on a held-out tournament dataset.
+* **Data Engineering (`src/data/builder.py`):** Extracts spatial features (Voronoi area, coverage arcs, Gaussian Pitch Control, unblocked passing lanes) from 360° freeze-frames, assigns intended xT values, and maps dynamic position groups.
+* **Bayesian Model (`src/models/bayesian.py`):** A pooled hierarchical Zero-Inflated Beta (Hurdle) regression.
+  * **Turnover Risk (Logistic):** `Bernoulli(p)`
+  * **Value Retention (Beta):** `Beta(mu * kappa, (1-mu) * kappa)`
+  * **Random Effects:** Player Skill ($\theta$), Competition context, and Opponent Team defensive quality estimated for both model components.
+* **Interpretability (`src/visualization/interpretability.py`):** Generates Individual Conditional Expectation (ICE) curves, Population Marginal Effects, and Covariance-Aware Variance Decomposition.
+* **Validation (`src/models/validation.py`):** Calculates out-of-sample stability correlations on a held-out tournament dataset using fully vectorized tensor operations.
 
 ## Setup & Installation
 
 Ensure you have Python 3.10+ installed. Install the necessary dependencies:
 
 ```bash
-pip install pandas numpy scipy scikit-learn matplotlib seaborn pymc arviz statsbombpy tqdm
+pip install pandas numpy scipy scikit-learn matplotlib seaborn pymc arviz statsbombpy tqdm shapely
 ```
 *(If you are on macOS or Linux, ensure you have a C-compiler installed for PyMC's backend, though `numpyro` is highly recommended for faster sampling).*
 
@@ -38,10 +39,10 @@ Execute the pipeline sequentially from the project root directory:
 # 1. Download data, apply tight-pressure filters, and engineer features
 python3 -m src.data.builder
 
-# 2. Fit the hierarchical Beta regression model (MCMC sampling)
+# 2. Fit the hierarchical Zero-Inflated Beta regression model (MCMC sampling)
 python3 -m src.models.bayesian
 
-# 3. Extract player PRS, calculate HDI, and categorize 'Best Under' scenarios
+# 3. Extract player dual metrics, calculate HDI, and categorize 'Best Under' scenarios
 python3 -m src.models.inference
 
 # 4. Validate model via residual-based cross-tournament correlation
@@ -55,6 +56,6 @@ python3 -m src.visualization.plots
 ```
 
 ## Output Artifacts
-* **`outputs/tables/prs_leaderboard.csv`**: The primary output containing each player's PRS, 90% HDI, and specialized composure profile (e.g., "Best Under: Front_Tight").
-* **`outputs/figures/`**: Contains visual insights including marginal threat curves, feature importance bar charts, the stability scatter plot, and the top 20 player leaderboard.
-* **`outputs/model_traces/`**: Contains the raw NetCDF trace files from the PyMC sampler for custom downstream analysis or extending the model without retraining.
+* **`outputs/tables/prs_leaderboard.csv`**: The primary output containing each player's Ball Security score, Value Retention score, Combined PRS, and specialized composure profile.
+* **`outputs/figures/`**: Contains visual insights including 2D scatter plots (Turnover Risk vs Value Retention), marginal threat curves, feature importance bar charts, and the stability scatter plot.
+* **`outputs/model_traces/`**: Contains the raw NetCDF trace files from the PyMC sampler for custom downstream analysis.
