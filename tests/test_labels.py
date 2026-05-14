@@ -1,7 +1,6 @@
 """Tests for src.data.labels.define_success."""
 import numpy as np
 import pandas as pd
-import pytest
 
 from src.data.labels import define_success
 

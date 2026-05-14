@@ -2,14 +2,14 @@ import os
 from pathlib import Path
 
 # Paths
-ROOT_DIR = Path(__file__).parent
-DATA_DIR = ROOT_DIR / "data"
-RAW_DATA_DIR = DATA_DIR / "raw"
+ROOT_DIR           = Path(__file__).parent
+DATA_DIR           = ROOT_DIR / "data"
+RAW_DATA_DIR       = DATA_DIR / "raw"
 PROCESSED_DATA_DIR = DATA_DIR / "processed"
-OUTPUT_DIR = ROOT_DIR / "outputs"
-MODEL_TRACES_DIR = OUTPUT_DIR / "model_traces"
-FIGURES_DIR = OUTPUT_DIR / "figures"
-TABLES_DIR = OUTPUT_DIR / "tables"
+OUTPUT_DIR         = ROOT_DIR / "outputs"
+MODEL_TRACES_DIR   = OUTPUT_DIR / "model_traces"
+FIGURES_DIR        = OUTPUT_DIR / "figures"
+TABLES_DIR         = OUTPUT_DIR / "tables"
 
 # Competitions (Verified available 360 data)
 COMPETITIONS = {

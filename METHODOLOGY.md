@@ -1,6 +1,6 @@
 # Methodology: Pressure Resistance Score (PRS)
 
-This document serves as the formal, comprehensive whitepaper detailing the mathematical, conceptual, and analytical framework underpinning the **Pressure Resistance Score (PRS)**. It outlines the paradigm shift from naive success metrics to a dual-axis value framework, the derivation of domain-accurate geometric features from 360-degree freeze-frame data, the architecture of the Bayesian Hierarchical Zero-Inflated Beta Regression (Hurdle Model), and the rigorous out-of-sample validation strategy utilized to prove its efficacy.
+This document serves as the formal, comprehensive whitepaper detailing the mathematical, conceptual, and analytical framework underpinning the **Pressure Resistance Score (PRS)**. It outlines the paradigm shift from naive success metrics to a dual-axis value framework, the derivation of domain-accurate geometric features from 360-degree freeze-frame data, the architecture of the Bayesian Hierarchical Beta Hurdle Model, and the rigorous out-of-sample validation strategy utilized to evaluate its efficacy.
 
 ---
 
@@ -10,12 +10,12 @@ Historically, football analytics has evaluated a player's "pressure resistance" 
 
 1. **The Safe-Pass Bias (Survival Bias):** Binary completion metrics treat a 2-yard backward pass to an unmarked center-back exactly the same as a 20-yard line-breaking pass through an opponent's midfield block. Both are logged as a "success" ($Y = 1$). Consequently, players who are highly risk-averse—those who immediately recycle possession backwards the moment they feel pressure—are artificially rewarded. This masks a player's inability to actually progress the ball when constrained.
 2. **The Zero-Inflation Problem:** A player under pressure faces two distinct, sequential cognitive challenges: 
-   * *Phase 1: Can I physically keep the ball?* (Ball Security / Turnover Risk)
+   * *Phase 1: Can I physically keep the ball?* (Ball Security / possession retention)
    * *Phase 2: If I keep it, can I execute a dangerous action?* (Value Generation / Offensive Output)
    Standard continuous models collapse these two distinct processes into a single metric, failing to handle the massive spike of exact zeroes (turnovers) in the data. A failed action creates an artificial floor that breaks the assumptions of standard linear regression.
 3. **The Spatial Vacuum:** Traditional models largely ignore the surrounding pitch geometry. A player's ability to complete a pass depends heavily on unblocked passing lanes, the angular span of closing opponents, and the dynamic shifting of pitch control. A model without geometric context is evaluating decisions in a vacuum.
 
-The PRS framework resolves these fundamental flaws by migrating to a **Zero-Inflated Hurdle framework**. This allows us to evaluate *Turnover Risk* independently from *Expected Threat (xT) Retained*, conditioning both values on the exact spatial geometry of the dual, and extracting the player's true underlying skill via a Bayesian hierarchical model.
+The PRS framework resolves these fundamental flaws by migrating to a **Hurdle framework**. This allows us to evaluate *Ball Security* independently from *Expected Threat (xT) Retained*, conditioning both values on the exact spatial geometry of the duel, and extracting the player's true underlying skill via a Bayesian hierarchical model.
 
 ---
 
@@ -31,7 +31,7 @@ Utilizing the continuous $x,y$ coordinates from the 360° freeze-frames, we calc
 
 To remove the statistical noise of "token pressure"—such as a striker casually jogging toward a defender from 8 yards away—we strictly filter the dataset to only include events where:
 $$ d_{min} \le 5.0 \text{ yards} $$
-This forces the model to evaluate genuine, close-quarters duals, ensuring that a high PRS score translates directly to performance in the most heavily contested areas of the pitch.
+This forces the model to evaluate genuine, close-quarters duels, ensuring that a high PRS score translates directly to performance in the most heavily contested areas of the pitch.
 
 ### 2.3 Dynamic Positional Stratification
 Players are grouped into broad tactical roles: Defender, Midfielder, and Forward. This allows the hierarchical model to estimate baseline spatial constraints and expected values specific to each role. A center-back naturally operates in deeper zones with lower baseline Expected Threat (xT) opportunities compared to a forward receiving the ball on the edge of the penalty box. 
@@ -42,7 +42,7 @@ To prevent the arbitrary misclassification of players who lack formal lineup dat
 
 ## 3. Geometric Feature Engineering
 
-For every filtered pressure event $i$, we construct a rich, highly non-linear vector of spatial features $X_i$ from the 360° freeze-frame. Let the ball-carrier's location be $C = (x_c, y_c)$, the set of teammates $T$, and the set of opponents $O$.
+For every filtered carrier action $i$ under pressure, we construct a rich, highly non-linear vector of spatial features $X_i$ from the 360° freeze-frame. Multiple defender `Pressure` events linked to the same carrier action are collapsed to one modeled observation, because the freeze-frame features already encode how many opponents are close. Let the ball-carrier's location be $C = (x_c, y_c)$, the set of teammates $T$, and the set of opponents $O$.
 
 ### 3.1 Gaussian Pitch Control
 We discard naive additive distance formulas in favor of a continuous **Gaussian Influence Model** (inspired by Fernandez and Bornn's wide-scale pitch control models). It calculates the probabilistic ownership of the ball-carrier's immediate location based on the density and proximity of teammates versus opponents. 
@@ -75,7 +75,7 @@ Three non-spatial contextual features are appended to the feature vector from th
 |---------|---------|-----------|
 | `game_state_diff` | Goal tracking (Shot + Own Goal events) | Score differential at event time from ball-carrier's team perspective. Captures clutch-pressure effects and game management behaviour. |
 | `minutes_elapsed` | Event `minute` field | Enables the model to learn fatigue and time-pressure effects. |
-| `match_period` | Event `period` field | Accounts for structural differences between first and second halves (e.g., tactical adjustments, substitutions). |
+| `match_period` | Event `period` field | Accounts for structural differences between match periods, including extra time when present. |
 
 `game_state_diff` is computed by scanning events chronologically and tracking goals via `type == 'Shot'` with `shot_outcome == 'Goal'` and `type == 'Own Goal For'` events. The differential is recorded *before* each event is processed, ensuring no lookahead leakage.
 
@@ -93,13 +93,13 @@ $$ V_{scaled} = \left( \frac{V_{intended}}{V_{max}} \right) (1 - 2\epsilon) + \e
 
 ---
 
-## 5. Bayesian Hierarchical Zero-Inflated Beta Regression (Hurdle Model)
+## 5. Bayesian Hierarchical Beta Hurdle Model
 
 To extract the underlying, unobservable cognitive traits of the players, we construct a joint Hurdle Model using PyMC and the NUTS (No-U-Turn Sampler) algorithm.
 
 ### 5.1 The Hurdle Architecture
 The model strictly separates the prediction space into two sequential hurdles:
-* **Hurdle 1 (Turnover Risk):** Modeled via Logistic Regression. Predicts the probability $p$ that $Y_{success} = 1$.
+* **Hurdle 1 (Ball Security):** Modeled via Logistic Regression. Predicts the probability $p$ that $Y_{success} = 1$.
    $$ Y_{success} \sim \text{Bernoulli}(p) $$
 * **Hurdle 2 (Value Retention):** Modeled via Beta Regression. Evaluated *only* on the subset of data where $Y_{success} = 1$. It predicts the expected value generated $\mu$, given that the ball was not lost.
    $$ V_{scaled} \sim \text{Beta}(\alpha=\mu \kappa, \beta=(1 - \mu) \kappa) $$
@@ -119,7 +119,7 @@ Where:
 * $\zeta_{comp}$: Random effect capturing the tactical ecosystem and competitive standard of the competition.
 
 ### 5.3 Priors and Non-Centered Parameterization
-We enforce weakly informative Normal priors to provide regularization (shrinkage), preventing the model from overfitting players with small sample sizes (e.g., a youth player who succeeds in 2 out of 2 duals will be shrunk heavily toward the mean). 
+We enforce weakly informative Normal priors to provide regularization (shrinkage), preventing the model from overfitting players with small sample sizes (e.g., a youth player who succeeds in 2 out of 2 duels will be shrunk heavily toward the mean).
 
 To optimize the Hamiltonian Monte Carlo sampler and navigate the complex geometric funnels of hierarchical models, we utilize **non-centered parameterizations** for all random effects. For example, rather than sampling $\theta$ directly from $\mathcal{N}(0, \sigma)$, we sample a raw standard normal and multiply it by the standard deviation:
 $$ \tilde{\theta}_{player} \sim \mathcal{N}(0, 1) $$
@@ -157,14 +157,14 @@ We then subtract the positional population baseline (what an average player in t
 
 ## 7. Validation Strategy: Out-of-Sample Residual Correlation
 
-Evaluating performance via in-sample loss functions (like AUC or RMSE on the training set) is insufficient for proving a metric represents a scoutable, intrinsic player trait rather than statistical noise. The PRS utilizes **Out-of-Sample Expected Value Residual Correlation**, the gold standard in sports analytics.
+Evaluating performance via in-sample loss functions (like AUC or RMSE on the training set) is insufficient for assessing whether a metric represents a scoutable, intrinsic player trait rather than statistical noise. The PRS utilizes **Out-of-Sample Expected Value Residual Correlation**, a strong validation pattern in sports analytics.
 
 1. **Prediction Generation:** The Hurdle model is trained on a massive, diverse set of competitions (e.g., Euro 2024, World Cup 2022).
-2. **Holdout Evaluation:** A completely separate competition with a distinct tactical ecosystem (e.g., Euro 2020) is withheld. For every pressure event $j$ in the holdout set, we calculate the expected value generated by an *average* player in that exact spatial geometry using fully vectorized tensor operations:
+2. **Holdout Evaluation:** A completely separate competition with a distinct tactical ecosystem (e.g., Euro 2020) is withheld. For every carrier action under pressure $j$ in the holdout set, we calculate the expected value generated by an *average* player in that exact spatial geometry using fully vectorized tensor operations:
    $$ \hat{V}_j = p_{baseline, j} \times \mu_{baseline, j} \times V_{max} $$
 3. **Residual Aggregation:** We calculate the true value generated *above expected* for that specific event:
    $$ r_j = V_{true, j} - \hat{V}_j $$
    *(A positive residual means the player achieved an outcome better than the mathematical difficulty of the situation suggested).*
 4. **Correlation:** We average the residuals per player across their season in the holdout dataset ($\bar{r}_{player}$) and correlate this with their *training* PRS ($\theta_{player}$) derived from the entirely separate training dataset.
 
-A significant positive Pearson correlation empirically proves that the dual $\theta$ traits extracted by the model accurately measure stable, persistent cognitive and technical traits. It proves that composure under pressure is not random variance, but a measurable skill that transfers across entirely different tactical environments, leagues, and tournaments.
+A significant positive Pearson correlation is evidence that the two $\theta$ traits extracted by the model capture stable, persistent cognitive and technical traits. It supports the claim that composure under pressure is not merely random variance, but a measurable skill that can transfer across different tactical environments, leagues, and tournaments.

@@ -1,6 +1,5 @@
 """Tests for src.features.geometry.angular_span."""
 import numpy as np
-import pytest
 
 from src.features.geometry import angular_span
 from config import SPATIAL_CONFIG

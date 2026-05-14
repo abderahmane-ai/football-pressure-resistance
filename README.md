@@ -1,10 +1,10 @@
 # Pressure Resistance Score (PRS)
 
-A production-grade Bayesian hierarchical framework for measuring football player composure under pressure, leveraging StatsBomb 360 freeze-frame data.
+A research-grade Bayesian hierarchical framework for measuring football player composure under pressure, leveraging StatsBomb 360 freeze-frame data.
 
 ## Overview
 
-Traditional metrics evaluate passes under pressure but fail to account for spatial context (distance to opponents, angular coverage, passing lane geometry). The **Pressure Resistance Score (PRS)** uses a **Hierarchical Zero-Inflated Beta Hurdle Model** to simultaneously evaluate *Ball Security* (Turnover Risk) and *Value Retention* (Expected Threat preserved) during tight-pressure duels. Player scores are adjusted for opponent quality, competition context, and positional role — isolating each player's true intrinsic composure trait.
+Traditional metrics evaluate passes under pressure but fail to account for spatial context (distance to opponents, angular coverage, passing lane geometry). The **Pressure Resistance Score (PRS)** uses a **Hierarchical Beta Hurdle Model** to simultaneously evaluate *Ball Security* (possession retention) and *Value Retention* (Expected Threat preserved) during tight-pressure duels. Player scores are adjusted for opponent quality, competition context, and positional role — isolating each player's true intrinsic composure trait.
 
 ### Key Design Decisions
 
@@ -14,9 +14,10 @@ Traditional metrics evaluate passes under pressure but fail to account for spati
 | **Non-centered parameterisation** | All random effects sampled as `θ_raw ~ N(0,1)` then scaled, ensuring HMC sampler navigates hierarchical funnels without divergences |
 | **Opponent + Competition random effects** | Removes environmental noise so θ_player reflects skill, not schedule strength |
 | **Tight-pressure filter (≤5 yards)** | Eliminates token pressure events; model only sees genuine close-quarters duels |
+| **One row per carrier action** | Collapses multiple defender `Pressure` logs linked to the same action, because freeze-frame geometry already captures pressure density |
 | **Raw `bc_x`, `bc_y` coordinates** | Replaces an ordinal zone integer that falsely implied a linear relationship across pitch thirds |
 | **Parallelised data build** | `ThreadPoolExecutor` across matches; API calls and numpy operations both release the GIL for significant speedup |
-| **Out-of-sample residual correlation** | Gold-standard validation — proves PRS is a stable, transferable trait, not in-sample noise |
+| **Out-of-sample residual correlation** | Strong validation check for whether PRS is stable and transferable rather than in-sample noise |
 
 ---
 
@@ -67,13 +68,13 @@ pressure_resistance/
 | `bc_x`, `bc_y` | Raw pitch coordinates (replaces misleading ordinal zone integer) |
 | `game_state_diff` | Score differential (carrier team − opponent) at event time |
 | `minutes_elapsed` | Match minute |
-| `match_period` | 1 or 2 |
+| `match_period` | StatsBomb period number (including extra time/shootout periods when present) |
 
 ---
 
 ## Model Specification
 
-### Turnover Risk (Logistic / Bernoulli)
+### Ball Security (Logistic / Bernoulli)
 $$\text{logit}(p_i) = \alpha_{succ} + X_i\beta_{succ} + \gamma_{pos,succ} + \theta_{player,succ} + \delta_{opp,succ} + \zeta_{comp,succ}$$
 $$Y_{success} \sim \text{Bernoulli}(p_i)$$
 
@@ -100,13 +101,12 @@ $$V_{scaled} \sim \text{Beta}(\mu_i \cdot \kappa,\ (1-\mu_i) \cdot \kappa), \qua
 Requires Python 3.10+.
 
 ```bash
-pip install pandas numpy scipy scikit-learn matplotlib seaborn \
-            pymc arviz statsbombpy tqdm shapely
+pip install -r requirements.txt
 ```
 
 For hardware-accelerated MCMC (strongly recommended on Apple Silicon):
 ```bash
-pip install numpyro jax jaxlib
+pip install -r requirements-accelerated.txt
 pip install jax-metal        # Mac GPU backend
 ```
 

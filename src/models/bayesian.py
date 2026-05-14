@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 def fit_pooled_model():
     """
-    Fit a Zero-Inflated (Hurdle) model separating Turnover Risk from Value Retention.
+    Fit a hurdle model separating Ball Security from Value Retention.
     """
     dataset_path = PROCESSED_DATA_DIR / "all_pressure_dataset.parquet"
     if not dataset_path.exists():
@@ -176,6 +176,10 @@ def fit_pooled_model():
         
         logger.info("Starting MCMC sampling...")
         try:
+            # chain_method='vectorized' uses vmap to run all chains simultaneously
+            # on a single GPU device — correct and fast for single-device setups.
+            # 'parallel' (pmap) requires one device per chain and silently falls
+            # back to sequential when only 1 GPU is present, giving a 4x slowdown.
             trace = pm.sample(
                 draws=MODEL_SETTINGS['draws'],
                 tune=MODEL_SETTINGS['tune'],
@@ -183,11 +187,12 @@ def fit_pooled_model():
                 target_accept=MODEL_SETTINGS['target_accept'],
                 random_seed=MODEL_SETTINGS['random_seed'],
                 nuts_sampler=MODEL_SETTINGS['nuts_sampler'],
+                nuts_sampler_kwargs={"chain_method": "vectorized"},
                 return_inferencedata=True,
-                progressbar=True
+                progressbar=True,
             )
         except Exception as e:
-            logger.warning(f"numpyro failed: {e}. Falling back to default NUTS.")
+            logger.warning(f"numpyro vectorized failed: {e}. Falling back to default NUTS.")
             trace = pm.sample(
                 draws=MODEL_SETTINGS['draws'],
                 tune=MODEL_SETTINGS['tune'],
@@ -195,7 +200,7 @@ def fit_pooled_model():
                 target_accept=MODEL_SETTINGS['target_accept'],
                 random_seed=MODEL_SETTINGS['random_seed'],
                 return_inferencedata=True,
-                progressbar=True
+                progressbar=True,
             )
         
     trace_path = MODEL_TRACES_DIR / "pooled_trace.nc"

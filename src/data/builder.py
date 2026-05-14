@@ -25,6 +25,11 @@ def compute_game_state_for_match(match_events):
     of every event in the match, using StatsBomb Shot/Own Goal events.
     Returns dict: event_id -> int score diff.
     """
+    if 'index' in match_events.columns:
+        match_events = match_events.sort_values(by='index')
+    elif 'timestamp' in match_events.columns:
+        match_events = match_events.sort_values(by='timestamp')
+
     teams = match_events['team_id'].dropna().unique()
     if len(teams) != 2:
         return {}
@@ -100,6 +105,8 @@ def _process_single_match(args):
                 'competition': comp_name,
                 'match_id': item['match_id'],
                 'pressure_event_id': item['pressure_event_id'],
+                'pressure_event_ids': item.get('pressure_event_ids', [item['pressure_event_id']]),
+                'n_pressure_events': item.get('n_pressure_events', 1),
                 'ball_carrier_event_id': item['ball_carrier_event_id'],
                 'player_id': player_id,
                 'player_name': player_name,
@@ -199,6 +206,10 @@ def get_player_position_groups(match_id, match_events=None):
                     
     return position_map
 
+def _is_valid_loc(loc):
+    """Accept list, tuple, or numpy array with at least 2 elements."""
+    return loc is not None and hasattr(loc, '__len__') and len(loc) >= 2
+
 def compute_intended_xt(item, match_events):
     """
     Compute the intended expected threat (xT) of the action, regardless of success.
@@ -206,40 +217,46 @@ def compute_intended_xt(item, match_events):
     """
     bc_event_id = item['ball_carrier_event_id']
     bc_event_rows = match_events[match_events['id'] == bc_event_id]
-    
+
     if bc_event_rows.empty:
         return None
-        
+
     bc_event = bc_event_rows.iloc[0]
     bc_idx = bc_event_rows.index[0]
-    
+
     bc_loc = bc_event.get('location')
-    if not isinstance(bc_loc, (list, tuple)) or len(bc_loc) < 2:
-        # Check previous event for location imputation
+    if not _is_valid_loc(bc_loc):
+        # Impute from previous event
         if bc_idx > 0:
             prev_event = match_events.iloc[bc_idx - 1]
-            if 'end_location' in prev_event and isinstance(prev_event['end_location'], (list, tuple)):
-                bc_loc = prev_event['end_location']
-            elif 'location' in prev_event and isinstance(prev_event['location'], (list, tuple)):
-                bc_loc = prev_event['location']
+            end_loc = prev_event.get('end_location')
+            prev_loc = prev_event.get('location')
+            if _is_valid_loc(end_loc):
+                bc_loc = end_loc
+            elif _is_valid_loc(prev_loc):
+                bc_loc = prev_loc
             else:
                 return None
         else:
             return None
-            
+
     next_xt = xt_value(bc_loc[0], bc_loc[1])
-    
-    if bc_event['type'] == 'Pass' and 'pass_end_location' in bc_event:
-        end_loc = bc_event['pass_end_location']
-        if isinstance(end_loc, (list, tuple)) and len(end_loc) >= 2:
+
+    if bc_event['type'] == 'Pass':
+        end_loc = bc_event.get('pass_end_location')
+        if _is_valid_loc(end_loc):
+            next_xt = xt_value(end_loc[0], end_loc[1])
+    elif bc_event['type'] == 'Carry':
+        end_loc = bc_event.get('carry_end_location')
+        if _is_valid_loc(end_loc):
             next_xt = xt_value(end_loc[0], end_loc[1])
     elif bc_idx + 1 < len(match_events):
-        next_event = match_events.iloc[bc_idx + 1]
-        next_loc = next_event.get('location')
-        if isinstance(next_loc, (list, tuple)) and len(next_loc) >= 2:
+        next_loc = match_events.iloc[bc_idx + 1].get('location')
+        if _is_valid_loc(next_loc):
             next_xt = xt_value(next_loc[0], next_loc[1])
-            
+
     return float(next_xt)
+
 
 def build_all_datasets(include_holdout=False):
     """Build the complete processed dataset for all competitions (parallelised per match)."""

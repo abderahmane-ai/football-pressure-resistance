@@ -41,7 +41,7 @@ def run_interpretability_analysis():
     beta_succ_summary = az.summary(trace, var_names=['beta_succ'], hdi_prob=0.90)
     beta_val_summary = az.summary(trace, var_names=['beta_val'], hdi_prob=0.90)
     
-    beta_succ_summary.index = [f + "_turnover_risk" for f in feature_names]
+    beta_succ_summary.index = [f + "_ball_security" for f in feature_names]
     beta_val_summary.index = [f + "_value_retention" for f in feature_names]
     
     beta_summary = pd.concat([beta_succ_summary, beta_val_summary])

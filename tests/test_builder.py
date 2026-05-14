@@ -1,6 +1,5 @@
 """Tests for src.data.builder.compute_game_state_for_match."""
 import pandas as pd
-import pytest
 
 from src.data.builder import compute_game_state_for_match
 
@@ -79,3 +78,12 @@ class TestComputeGameState:
         )
         state = compute_game_state_for_match(events)
         assert state['e2'] == 0
+
+    def test_uses_event_index_order_when_available(self):
+        events = make_events(
+            {'id': 'e2', 'type': 'Pass', 'team_id': 'B', 'shot_outcome': None, 'index': 2},
+            {'id': 'e1', 'type': 'Shot', 'team_id': 'A', 'shot_outcome': 'Goal', 'index': 1},
+        )
+        state = compute_game_state_for_match(events)
+        assert state['e1'] == 0
+        assert state['e2'] == -1

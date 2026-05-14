@@ -13,7 +13,7 @@ except AttributeError:
     sns.set_style("whitegrid")
 
 def plot_prs_leaderboard():
-    """Plot Top players on a 2D plane: Turnover Risk vs Value Retention."""
+    """Plot top players on a 2D plane: Ball Security vs Value Retention."""
     path = TABLES_DIR / "prs_leaderboard.csv"
     if not path.exists(): return
     
@@ -26,17 +26,16 @@ def plot_prs_leaderboard():
     
     plt.figure(figsize=(10, 10))
     
-    sns.scatterplot(data=df, x='mean_Turnover_Risk_Score', y='mean_Value_Retention_Score', 
+    sns.scatterplot(data=df, x='mean_Ball_Security_Score', y='mean_Value_Retention_Score',
                     hue='position_group', s=100, alpha=0.8, palette='Set1')
     
     for i, row in df.iterrows():
-        plt.text(row['mean_Turnover_Risk_Score'] + 0.005, row['mean_Value_Retention_Score'], 
+        plt.text(row['mean_Ball_Security_Score'] + 0.005, row['mean_Value_Retention_Score'],
                  row['player_name'], fontsize=9)
         
     plt.axvline(0, color='grey', linestyle='--', alpha=0.5)
     plt.axhline(0, color='grey', linestyle='--', alpha=0.5)
     
-    # mean_Turnover_Risk_Score = -theta_succ; higher = better ball security
     plt.title('Pressure Resistance: Ball Security vs. Value Retention (Top 30)', fontsize=14)
     plt.xlabel('Ball Security under Pressure (Higher = Keeps possession)', fontsize=12)
     plt.ylabel('Value Retention (Higher = More dangerous when successful)', fontsize=12)
@@ -55,10 +54,10 @@ def plot_feature_importance():
     if df.empty:
         return
     
-    df_turnover = df[df.index.str.contains('_turnover_risk')].copy()
+    df_turnover = df[df.index.str.contains('_ball_security')].copy()
     df_value = df[df.index.str.contains('_value_retention')].copy()
     
-    df_turnover.index = df_turnover.index.str.replace('_turnover_risk', '')
+    df_turnover.index = df_turnover.index.str.replace('_ball_security', '')
     df_value.index = df_value.index.str.replace('_value_retention', '')
     
     df_turnover = df_turnover.sort_values(by='abs_mean', ascending=True)
@@ -72,7 +71,7 @@ def plot_feature_importance():
                  xerr=[df_turnover['mean'] - df_turnover['hdi_5%'], df_turnover['hdi_95%'] - df_turnover['mean']], 
                  color=colors_turn, alpha=0.7)
     axes[0].axvline(0, color='black', lw=1)
-    axes[0].set_title('Effect on Ball Security (Turnover Risk)', fontsize=12)
+    axes[0].set_title('Effect on Ball Security', fontsize=12)
     
     colors_val = ['crimson' if x < 0 else 'forestgreen' for x in df_value['mean']]
     axes[1].barh(df_value.index, df_value['mean'], 
@@ -111,7 +110,7 @@ def plot_stability_analysis():
     
     from config import CROSS_VALIDATION_HOLDOUT
     holdout_name = CROSS_VALIDATION_HOLDOUT.replace("_", " ")
-    plt.title(f'Cross-Tournament Stability Proof\nTraining Combined PRS vs {holdout_name} Holdout Residuals', fontsize=13)
+    plt.title(f'Cross-Tournament Stability Check\nTraining Combined PRS vs {holdout_name} Holdout Residuals', fontsize=13)
     plt.xlabel('Training Combined PRS (Expected xT Gain)', fontsize=11)
     plt.ylabel('Holdout Residual (Actual Value Gain above Predicted)', fontsize=11)
     

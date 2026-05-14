@@ -4,6 +4,52 @@ import ast
 
 logger = logging.getLogger(__name__)
 
+BALL_CARRIER_EVENT_TYPES = {'Pass', 'Carry', 'Dribble'}
+
+
+def _normalise_related_events(value):
+    """Return related event ids as a plain list across parquet/API variants."""
+    if isinstance(value, str):
+        try:
+            value = ast.literal_eval(value)
+        except Exception:
+            return []
+    elif hasattr(value, 'tolist'):
+        value = value.tolist()
+
+    if not isinstance(value, list):
+        return []
+    return [event_id for event_id in value if isinstance(event_id, str)]
+
+
+def dedupe_pressure_events_by_carrier(paired_events):
+    """
+    Collapse multiple defender Pressure rows linked to the same carrier action.
+
+    The modeling unit is the ball-carrier's action under pressure, not one row per
+    pressing defender. Freeze-frame features already encode how many defenders
+    are close, so repeated rows would overweight the same outcome.
+    """
+    by_carrier = {}
+    for item in paired_events:
+        carrier_id = item.get('ball_carrier_event_id')
+        if carrier_id is None:
+            continue
+
+        if carrier_id not in by_carrier:
+            item = item.copy()
+            item['pressure_event_ids'] = [item['pressure_event_id']]
+            item['n_pressure_events'] = 1
+            by_carrier[carrier_id] = item
+        else:
+            existing = by_carrier[carrier_id]
+            pressure_id = item.get('pressure_event_id')
+            if pressure_id not in existing['pressure_event_ids']:
+                existing['pressure_event_ids'].append(pressure_id)
+                existing['n_pressure_events'] += 1
+
+    return list(by_carrier.values())
+
 def pair_pressure_with_ball_carrier(events, frames_dict):
     """
     Pair 'Pressure' events with the related ball-carrier event and its 360 freeze frame.
@@ -21,6 +67,11 @@ def pair_pressure_with_ball_carrier(events, frames_dict):
         return results
         
     pressure_events = events[events['type'] == 'Pressure']
+    events_lookup = {
+        row['id']: row
+        for _, row in events.iterrows()
+        if isinstance(row.get('id'), str)
+    }
     
     # O(1) frame lookup by event_uuid
     frames_lookup = {}
@@ -30,30 +81,28 @@ def pair_pressure_with_ball_carrier(events, frames_dict):
         
     for _, pressure_event in pressure_events.iterrows():
         try:
-            related_event_ids = pressure_event.get('related_events', [])
-            # Handle string representation of lists if loaded from certain formats
-            if isinstance(related_event_ids, str):
-                try:
-                    related_event_ids = ast.literal_eval(related_event_ids)
-                except Exception:
+            related_event_ids = _normalise_related_events(pressure_event.get('related_events', []))
+            if not related_event_ids:
+                continue
+
+            pressure_team_id = pressure_event.get('team_id', None)
+            candidate_events = []
+            for related_id in related_event_ids:
+                related_event = events_lookup.get(related_id)
+                if related_event is None:
                     continue
-            elif hasattr(related_event_ids, 'tolist'):  # numpy array (parquet round-trip)
-                related_event_ids = related_event_ids.tolist()
-                    
-            if not isinstance(related_event_ids, list) or len(related_event_ids) == 0:
+                if related_event.get('type') not in BALL_CARRIER_EVENT_TYPES:
+                    continue
+                if pressure_team_id is not None and related_event.get('team_id') == pressure_team_id:
+                    continue
+                candidate_events.append((related_id, related_event))
+
+            if not candidate_events:
                 continue
-                
-            related_id = related_event_ids[0]
-            
-            related_event = events[events['id'] == related_id]
-            if related_event.empty:
-                continue
-                
-            related_event = related_event.iloc[0]
-            
-            if related_event['type'] not in ['Pass', 'Carry', 'Dribble']:
-                continue
-                
+
+            # Preserve StatsBomb's related_events order, but choose the carrier
+            # action explicitly rather than assuming it is always the first id.
+            related_id, related_event = candidate_events[0]
             frame_data = frames_lookup.get(related_id)
             if not frame_data:
                 continue
@@ -72,4 +121,4 @@ def pair_pressure_with_ball_carrier(events, frames_dict):
         except Exception as e:
             logger.debug(f"Error pairing event {pressure_event.get('id')}: {e}")
             
-    return results
+    return dedupe_pressure_events_by_carrier(results)

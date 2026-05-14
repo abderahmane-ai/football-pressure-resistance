@@ -9,19 +9,28 @@ from config import MODEL_TRACES_DIR, TABLES_DIR, PROCESSED_DATA_DIR, SPATIAL_CON
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
+def _require_paths(*paths):
+    missing = [str(path) for path in paths if not path.exists()]
+    if missing:
+        raise FileNotFoundError(
+            "Required model artifact(s) missing. Run the pipeline from data build "
+            f"through model fitting first: {', '.join(missing)}"
+        )
+
 def run_posterior_analysis():
     """
-    Generate player leaderboards with Turnover Risk and Value Retention scores.
+    Generate player leaderboards with Ball Security and Value Retention scores.
     Uses expit for numeric stability and appropriately handles the Hurdle model outputs.
     """
     trace_path = MODEL_TRACES_DIR / "pooled_trace.nc"
-    if not trace_path.exists():
-        logger.error(f"Trace not found at {trace_path}")
-        return
+    mapping_path = MODEL_TRACES_DIR / "pooled_mappings.pkl"
+    scaler_path = MODEL_TRACES_DIR / "pooled_scaler.pkl"
+    dataset_path = PROCESSED_DATA_DIR / "all_pressure_dataset.parquet"
+    _require_paths(trace_path, mapping_path, scaler_path, dataset_path)
         
     trace = az.from_netcdf(trace_path)
     
-    mapping_path = MODEL_TRACES_DIR / "pooled_mappings.pkl"
     with open(mapping_path, "rb") as f:
         mappings = pickle.load(f)
     player_mapping = mappings['player']
@@ -29,19 +38,18 @@ def run_posterior_analysis():
     name_lookup = mappings.get('name_lookup', {})
     pos_lookup = mappings.get('position_lookup', {})
     
-    scaler_path = MODEL_TRACES_DIR / "pooled_scaler.pkl"
     with open(scaler_path, "rb") as f:
         scaler_data = pickle.load(f)
         scaler = scaler_data['scaler']
         feature_names = scaler_data['features']
         max_value = scaler_data['max_value']
     
-    df = pd.read_parquet(PROCESSED_DATA_DIR / "all_pressure_dataset.parquet")
+    df = pd.read_parquet(dataset_path)
     event_counts = df['player_id'].value_counts().to_dict()
     
     post = trace.posterior
     
-    # Success (Turnover) Parameters
+    # Success / Ball Security parameters
     alpha_succ = post['alpha_succ'].values.flatten()
     beta_succ = post['beta_succ'].values.reshape(-1, len(feature_names))
     theta_succ = post['theta_succ'].values.reshape(-1, len(player_mapping))
@@ -117,15 +125,9 @@ def run_posterior_analysis():
         p_succ, e_val, t_ev = get_predictions(vec)
         pop_baselines[name] = t_ev.mean()
     
-    theta_succ_summary = az.summary(trace, var_names=['theta_succ'], hdi_prob=0.90)
-    theta_val_summary = az.summary(trace, var_names=['theta_val'], hdi_prob=0.90)
-    
     leaderboard = []
-    for idx, row in theta_succ_summary.iterrows():
+    for idx_num, player_id in player_mapping.items():
         try:
-            idx_num = int(idx.split('[')[1].split(']')[0])
-            player_id = player_mapping[idx_num]
-            
             n_events = event_counts.get(player_id, 0)
             if n_events < MIN_EVENTS_THRESHOLD:
                 continue
@@ -145,18 +147,19 @@ def run_posterior_analysis():
                     max_advantage = advantage
                     best_scenario = s_name
             
-            # Value retention summary
-            val_row = theta_val_summary.loc[f"theta_val[{idx_num}]"]
+            ball_security_samples = theta_succ[:, idx_num]
+            value_retention_samples = theta_val[:, idx_num]
+            prs_samples = ball_security_samples + value_retention_samples
             
             leaderboard.append({
                 'player_id': player_id,
                 'player_name': player_name,
                 'position_group': position_group,
-                'mean_Turnover_Risk_Score': -row['mean'], # Negative theta_succ means higher turnover risk
-                'mean_Value_Retention_Score': val_row['mean'],
-                'mean_PRS': row['mean'] + val_row['mean'], # Combined proxy
-                'hdi_5%': row['hdi_5%'] + val_row['hdi_5%'],
-                'hdi_95%': row['hdi_95%'] + val_row['hdi_95%'],
+                'mean_Ball_Security_Score': ball_security_samples.mean(),
+                'mean_Value_Retention_Score': value_retention_samples.mean(),
+                'mean_PRS': prs_samples.mean(),
+                'hdi_5%': np.percentile(prs_samples, 5),
+                'hdi_95%': np.percentile(prs_samples, 95),
                 'n_events': n_events,
                 'best_under_scenario': best_scenario
             })
@@ -165,6 +168,7 @@ def run_posterior_analysis():
             
     lb_df = pd.DataFrame(leaderboard).sort_values(by='mean_PRS', ascending=False)
     
+    TABLES_DIR.mkdir(parents=True, exist_ok=True)
     out_path = TABLES_DIR / "prs_leaderboard.csv"
     lb_df.to_csv(out_path, index=False)
     logger.info(f"Saved leaderboard with {len(lb_df)} players (n>=20) to {out_path}")
@@ -172,7 +176,7 @@ def run_posterior_analysis():
     top_players = lb_df.head(10)
     logger.info("\n=== TOP 10 PRESSURE RESISTANCE SCORES ===")
     for _, p in top_players.iterrows():
-        logger.info(f"{p['player_name']} ({p['position_group']}): PRS={p['mean_PRS']:.3f} | ValueRet={p['mean_Value_Retention_Score']:.3f} | TurnRisk={p['mean_Turnover_Risk_Score']:.3f}")
+        logger.info(f"{p['player_name']} ({p['position_group']}): PRS={p['mean_PRS']:.3f} | BallSec={p['mean_Ball_Security_Score']:.3f} | ValueRet={p['mean_Value_Retention_Score']:.3f}")
 
 if __name__ == "__main__":
     run_posterior_analysis()

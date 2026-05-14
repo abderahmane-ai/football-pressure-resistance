@@ -11,6 +11,15 @@ from config import TABLES_DIR, MODEL_TRACES_DIR, PROCESSED_DATA_DIR, SPATIAL_CON
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
+def _require_paths(*paths):
+    missing = [str(path) for path in paths if not path.exists()]
+    if missing:
+        raise FileNotFoundError(
+            "Required validation artifact(s) missing. Run data build, model fitting, "
+            f"and leaderboard generation first: {', '.join(missing)}"
+        )
+
 def run_cross_validation():
     """
     Principled cross-validation: Correlate training PRS with 
@@ -20,17 +29,19 @@ def run_cross_validation():
     logger.info("=== CROSS-VALIDATION: VALUE-RESIDUAL CORRELATION ===")
     
     holdout_path = PROCESSED_DATA_DIR / "holdout_pressure_dataset.parquet"
-    if not holdout_path.exists():
-        logger.error("Holdout dataset not found. Run build_dataset.py first.")
-        return
+    trace_path = MODEL_TRACES_DIR / "pooled_trace.nc"
+    mapping_path = MODEL_TRACES_DIR / "pooled_mappings.pkl"
+    scaler_path = MODEL_TRACES_DIR / "pooled_scaler.pkl"
+    leaderboard_path = TABLES_DIR / "prs_leaderboard.csv"
+    _require_paths(holdout_path, trace_path, mapping_path, scaler_path, leaderboard_path)
     
     holdout_df = pd.read_parquet(holdout_path)
     holdout_df = holdout_df[holdout_df['dist_nearest_opp'] <= SPATIAL_CONFIG['tight_pressure_radius']]
     
-    trace = az.from_netcdf(MODEL_TRACES_DIR / "pooled_trace.nc")
-    with open(MODEL_TRACES_DIR / "pooled_mappings.pkl", "rb") as f:
+    trace = az.from_netcdf(trace_path)
+    with open(mapping_path, "rb") as f:
         mappings = pickle.load(f)
-    with open(MODEL_TRACES_DIR / "pooled_scaler.pkl", "rb") as f:
+    with open(scaler_path, "rb") as f:
         scaler_data = pickle.load(f)
     
     scaler = scaler_data['scaler']
@@ -95,7 +106,7 @@ def run_cross_validation():
     }).reset_index()
     player_stats = player_stats[player_stats['value_preserved'] >= MIN_EVENTS_THRESHOLD]
     
-    train_lb = pd.read_csv(TABLES_DIR / "prs_leaderboard.csv")
+    train_lb = pd.read_csv(leaderboard_path)
     merged = train_lb.merge(player_stats, on='player_id', suffixes=('_train', '_holdout'))
     
     if len(merged) < 5:
@@ -111,9 +122,14 @@ def run_cross_validation():
     
     y_true_bin = holdout_df['success'].values.astype(int)
     y_pred_prob = p_succ.mean(axis=0)
-    auc = roc_auc_score(y_true_bin, y_pred_prob)
-    logger.info(f"  Holdout AUC (Binary Success): {auc:.3f}")
-    
+    if len(np.unique(y_true_bin)) == 2:
+        auc = roc_auc_score(y_true_bin, y_pred_prob)
+        logger.info(f"  Holdout AUC (Binary Success): {auc:.3f}")
+    else:
+        auc = np.nan
+        logger.warning("Holdout AUC skipped because only one success class is present.")
+
+    TABLES_DIR.mkdir(parents=True, exist_ok=True)
     merged.to_csv(TABLES_DIR / "holdout_correlation_data.csv", index=False)
     
     metrics_df = pd.DataFrame([{
