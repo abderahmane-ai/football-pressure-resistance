@@ -48,5 +48,5 @@ def test_prepare_model_dataset_drops_only_rows_missing_required_model_values():
 def test_prepare_model_dataset_requires_success_rows_for_beta_component():
     raw = make_model_df(success_values=(0.0, 0.0))
 
-    with pytest.raises(DataValidationError, match="no successful actions"):
+    with pytest.raises(DataValidationError, match="zero successful actions"):
         prepare_model_dataset(raw)

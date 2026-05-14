@@ -1,5 +1,8 @@
 """Validation helpers for raw StatsBomb inputs and processed model data."""
+from __future__ import annotations
+
 import math
+from collections.abc import Iterable
 
 import pandas as pd
 
@@ -8,7 +11,7 @@ class DataValidationError(ValueError):
     """Raised when input data violates the pipeline's expected contract."""
 
 
-REQUIRED_EVENT_COLUMNS = {
+REQUIRED_EVENT_COLUMNS: set[str] = {
     "id",
     "index",
     "type",
@@ -18,12 +21,12 @@ REQUIRED_EVENT_COLUMNS = {
     "related_events",
 }
 
-REQUIRED_FRAME_COLUMNS = {
+REQUIRED_FRAME_COLUMNS: set[str] = {
     "event_uuid",
     "freeze_frame",
 }
 
-REQUIRED_MODEL_COLUMNS = {
+REQUIRED_MODEL_COLUMNS: set[str] = {
     "competition",
     "match_id",
     "pressure_event_id",
@@ -38,18 +41,23 @@ REQUIRED_MODEL_COLUMNS = {
 }
 
 
-def _ensure_dataframe(df, context):
+def _ensure_dataframe(df: object, context: str) -> None:
     if not isinstance(df, pd.DataFrame):
-        raise DataValidationError(f"{context} must be a pandas DataFrame.")
+        raise DataValidationError(
+            f"{context}: expected a pandas DataFrame, got {type(df).__name__}."
+        )
 
 
-def _ensure_columns(df, required_columns, context):
+def _ensure_columns(df: pd.DataFrame, required_columns: Iterable[str], context: str) -> None:
     missing = sorted(set(required_columns) - set(df.columns))
     if missing:
-        raise DataValidationError(f"{context} missing required column(s): {', '.join(missing)}")
+        raise DataValidationError(
+            f"{context}: missing required column(s): {', '.join(missing)}. "
+            f"Available columns: {', '.join(sorted(df.columns))}"
+        )
 
 
-def _is_valid_location(value):
+def _is_valid_location(value: object) -> bool:
     if value is None or (isinstance(value, float) and math.isnan(value)):
         return True
     if not hasattr(value, "__len__") or len(value) < 2:
@@ -58,62 +66,112 @@ def _is_valid_location(value):
     return pd.notna(x) and pd.notna(y)
 
 
-def validate_statsbomb_events(events_df, context="events"):
+def validate_statsbomb_events(events_df: pd.DataFrame, context: str = "events") -> None:
     """Validate the raw StatsBomb event columns used by pairing/labels/building."""
     _ensure_dataframe(events_df, context)
     _ensure_columns(events_df, REQUIRED_EVENT_COLUMNS, context)
 
     if events_df.empty:
-        raise DataValidationError(f"{context} is empty.")
+        raise DataValidationError(f"{context}: DataFrame is empty — no events to process.")
     for column in ["id", "type", "team_id", "match_id"]:
-        if events_df[column].isna().any():
-            raise DataValidationError(f"{context} contains null values in required column '{column}'.")
-    if events_df["id"].duplicated().any():
-        raise DataValidationError(f"{context} contains duplicate event ids.")
+        n_null = int(events_df[column].isna().sum())
+        if n_null > 0:
+            raise DataValidationError(
+                f"{context}: {n_null} null value(s) in required column '{column}'. "
+                "Upstream data download may be incomplete."
+            )
+    n_dupes = int(events_df["id"].duplicated().sum())
+    if n_dupes > 0:
+        raise DataValidationError(
+            f"{context}: {n_dupes} duplicate event id(s). "
+            "Check for repeated event downloads or concatenation errors."
+        )
 
     if "location" in events_df.columns:
         invalid = events_df["location"].dropna().map(_is_valid_location)
         if not invalid.all():
-            raise DataValidationError(f"{context} contains malformed event locations.")
+            n_bad = int((~invalid).sum())
+            raise DataValidationError(
+                f"{context}: {n_bad} event(s) with malformed locations "
+                "(expected [x, y] arrays with numeric values)."
+            )
 
 
-def validate_statsbomb_frames(frames_df, context="360 frames", allow_empty=True):
+def validate_statsbomb_frames(
+    frames_df: pd.DataFrame,
+    context: str = "360 frames",
+    allow_empty: bool = True,
+) -> None:
     """Validate the StatsBomb 360 frame columns required for event-frame lookup."""
     _ensure_dataframe(frames_df, context)
     if frames_df.empty:
         if allow_empty:
             return
-        raise DataValidationError(f"{context} is empty.")
+        raise DataValidationError(f"{context}: DataFrame is empty — no frames available.")
     _ensure_columns(frames_df, REQUIRED_FRAME_COLUMNS, context)
-    if frames_df["event_uuid"].isna().any():
-        raise DataValidationError(f"{context} contains null event_uuid values.")
-    if frames_df["event_uuid"].duplicated().any():
-        raise DataValidationError(f"{context} contains duplicate event_uuid values.")
+    n_null = int(frames_df["event_uuid"].isna().sum())
+    if n_null > 0:
+        raise DataValidationError(
+            f"{context}: {n_null} null event_uuid value(s). "
+            "360 frame data may be corrupt or partially downloaded."
+        )
+    n_dupes = int(frames_df["event_uuid"].duplicated().sum())
+    if n_dupes > 0:
+        raise DataValidationError(
+            f"{context}: {n_dupes} duplicate event_uuid(s). "
+            "Each frame row must correspond to exactly one event."
+        )
 
 
-def validate_model_dataset(dataset_df, feature_columns, context="processed model dataset"):
+def validate_model_dataset(
+    dataset_df: pd.DataFrame,
+    feature_columns: Iterable[str],
+    context: str = "processed model dataset",
+) -> None:
     """Validate the processed pressure dataset before model fitting or inference."""
     _ensure_dataframe(dataset_df, context)
     _ensure_columns(dataset_df, REQUIRED_MODEL_COLUMNS, context)
     _ensure_columns(dataset_df, feature_columns, context)
 
     if dataset_df.empty:
-        raise DataValidationError(f"{context} is empty.")
+        raise DataValidationError(f"{context}: dataset is empty after processing.")
     for column in ["player_id", "competition", "opponent_team_id", "position_group"]:
-        if dataset_df[column].isna().any():
-            raise DataValidationError(f"{context} contains null values in '{column}'.")
+        n_null = int(dataset_df[column].isna().sum())
+        if n_null > 0:
+            raise DataValidationError(
+                f"{context}: {n_null} null value(s) in grouping column '{column}'. "
+                "Check upstream data pairing logic."
+            )
 
     success_values = set(dataset_df["success"].dropna().unique())
     if not success_values <= {0, 0.0, 1, 1.0}:
-        raise DataValidationError(f"{context} success must be binary 0/1.")
-    if dataset_df["success"].isna().any():
-        raise DataValidationError(f"{context} contains null success labels.")
-    if dataset_df["value_preserved"].isna().any():
-        raise DataValidationError(f"{context} contains null value_preserved values.")
-    if (dataset_df["value_preserved"] < 0).any():
-        raise DataValidationError(f"{context} contains negative value_preserved values.")
+        raise DataValidationError(
+            f"{context}: success column contains non-binary values {success_values}. "
+            "Expected only 0 and 1."
+        )
+    n_null_success = int(dataset_df["success"].isna().sum())
+    if n_null_success > 0:
+        raise DataValidationError(
+            f"{context}: {n_null_success} null success label(s). "
+            "define_success() may have failed to label some events."
+        )
+    n_null_vp = int(dataset_df["value_preserved"].isna().sum())
+    if n_null_vp > 0:
+        raise DataValidationError(
+            f"{context}: {n_null_vp} null value_preserved value(s). "
+            "compute_intended_xt() may have returned None for some events."
+        )
+    n_neg = int((dataset_df["value_preserved"] < 0).sum())
+    if n_neg > 0:
+        raise DataValidationError(
+            f"{context}: {n_neg} negative value_preserved value(s). "
+            "xT values should always be non-negative."
+        )
 
     numeric_columns = list(feature_columns) + ["value_preserved"]
-    non_numeric = [column for column in numeric_columns if not pd.api.types.is_numeric_dtype(dataset_df[column])]
+    non_numeric = [col for col in numeric_columns if not pd.api.types.is_numeric_dtype(dataset_df[col])]
     if non_numeric:
-        raise DataValidationError(f"{context} has non-numeric model column(s): {', '.join(non_numeric)}")
+        raise DataValidationError(
+            f"{context}: non-numeric model column(s): {', '.join(non_numeric)}. "
+            "These must be numeric for StandardScaler and the MCMC sampler."
+        )
