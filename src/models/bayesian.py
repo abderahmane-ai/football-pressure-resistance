@@ -7,10 +7,33 @@ import pickle
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
-from config import PROCESSED_DATA_DIR, MODEL_TRACES_DIR, MODEL_SETTINGS
+from config import PROCESSED_DATA_DIR, MODEL_TRACES_DIR, MODEL_SETTINGS, MODEL_FEATURE_COLUMNS
+from src.data.validation import DataValidationError, validate_model_dataset
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def prepare_model_dataset(df):
+    """Validate and clean the processed pressure dataset for model fitting."""
+    validate_model_dataset(df, MODEL_FEATURE_COLUMNS)
+    required_columns = [
+        *MODEL_FEATURE_COLUMNS,
+        'success',
+        'value_preserved',
+        'player_id',
+        'player_name',
+        'competition',
+        'opponent_team_id',
+        'position_group',
+    ]
+    model_df = df.dropna(subset=required_columns).copy()
+    if model_df.empty:
+        raise DataValidationError("processed model dataset has no complete model rows after dropping nulls.")
+    if model_df['success'].sum() == 0:
+        raise DataValidationError("processed model dataset has no successful actions for the Beta value model.")
+    return model_df, list(MODEL_FEATURE_COLUMNS)
+
 
 def fit_pooled_model():
     """
@@ -22,21 +45,10 @@ def fit_pooled_model():
         return None
         
     df = pd.read_parquet(dataset_path)
-    df = df.dropna()
+    df, available_features = prepare_model_dataset(df)
     
     logger.info(f"Loaded dataset: {len(df)} observations")
     
-    feature_cols = [
-        'dist_nearest_opp', 'dist_2nd_nearest_opp', 'opps_within_1yd',
-        'opps_within_2yd', 'opps_within_4yd', 'angle_nearest_opp',
-        'coverage_arc', 'voronoi_area', 'n_free_teammates',
-        'max_free_triangle_area', 'dist_nearest_free_teammate',
-        'angle_nearest_free_teammate', 'pitch_control', 'opp_density_5yd',
-        'has_progressive_option', 'xt_value', 'bc_x', 'bc_y',
-        'game_state_diff', 'minutes_elapsed', 'match_period'
-    ]
-    
-    available_features = [c for c in feature_cols if c in df.columns]
     X = df[available_features].values
     
     y_success = df['success'].values.astype(int)
@@ -103,7 +115,7 @@ def fit_pooled_model():
     pos_idx_val = pos_idx[mask]
     
     with pm.Model():
-        # --- TURNOVER RISK MODEL (Logistic) ---
+        # --- BALL SECURITY MODEL (Logistic) ---
         X_data_succ = pm.Data("X_succ", X_scaled)
         pid_succ = pm.Data("pid_succ", player_idx)
         cid_succ = pm.Data("cid_succ", comp_idx)

@@ -7,10 +7,17 @@ from tqdm import tqdm
 from statsbombpy import sb
 from concurrent.futures import ThreadPoolExecutor
 
-from config import PROCESSED_DATA_DIR, COMPETITIONS, CROSS_VALIDATION_HOLDOUT, SPATIAL_CONFIG
+from config import (
+    PROCESSED_DATA_DIR,
+    COMPETITIONS,
+    CROSS_VALIDATION_HOLDOUT,
+    SPATIAL_CONFIG,
+    MODEL_FEATURE_COLUMNS,
+)
 from src.data.loader import load_all_competitions
 from src.data.pairing import pair_pressure_with_ball_carrier
 from src.data.labels import define_success
+from src.data.validation import validate_model_dataset, validate_statsbomb_events, validate_statsbomb_frames
 from src.features.spatial import extract_spatial_features_from_frame
 from src.features.geometry import xt_value
 
@@ -277,6 +284,9 @@ def build_all_datasets(include_holdout=False):
         frames_dict = comp_data['frames']
         if events_df.empty:
             continue
+        validate_statsbomb_events(events_df, context=f"{comp_name} events")
+        for match_id, frames_df in frames_dict.items():
+            validate_statsbomb_frames(frames_df, context=f"{comp_name} match {match_id} frames")
 
         match_ids = events_df['match_id'].unique()
 
@@ -313,6 +323,7 @@ def build_all_datasets(include_holdout=False):
 
     if all_processed_data:
         dataset_df = pd.DataFrame(all_processed_data)
+        validate_model_dataset(dataset_df, MODEL_FEATURE_COLUMNS, context="training pressure dataset")
         PROCESSED_DATA_DIR.mkdir(parents=True, exist_ok=True)
         out_file = PROCESSED_DATA_DIR / "all_pressure_dataset.parquet"
         dataset_df.to_parquet(out_file)
@@ -331,6 +342,9 @@ def build_holdout_dataset():
         frames_dict = comp_data['frames']
         if events_df.empty:
             continue
+        validate_statsbomb_events(events_df, context=f"{comp_name} events")
+        for match_id, frames_df in frames_dict.items():
+            validate_statsbomb_frames(frames_df, context=f"{comp_name} match {match_id} frames")
 
         match_ids = events_df['match_id'].unique()
 
@@ -361,6 +375,8 @@ def build_holdout_dataset():
 
     if all_processed_data:
         dataset_df = pd.DataFrame(all_processed_data)
+        validate_model_dataset(dataset_df, MODEL_FEATURE_COLUMNS, context="holdout pressure dataset")
+        PROCESSED_DATA_DIR.mkdir(parents=True, exist_ok=True)
         out_file = PROCESSED_DATA_DIR / "holdout_pressure_dataset.parquet"
         dataset_df.to_parquet(out_file)
         logger.info(f"Saved holdout with {len(dataset_df)} events to {out_file}")

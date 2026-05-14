@@ -4,6 +4,7 @@ import pandas as pd
 from statsbombpy import sb
 from tqdm import tqdm
 from config import RAW_DATA_DIR, COMPETITIONS
+from src.data.validation import validate_statsbomb_events, validate_statsbomb_frames
 
 warnings.filterwarnings("ignore", message="credentials were not supplied.*")
 
@@ -24,7 +25,9 @@ def load_competition_events(comp_id, season_id):
             logger.warning(f"Could not load events for match {match_id}: {e}")
             
     if all_events:
-        return pd.concat(all_events, ignore_index=True)
+        events_df = pd.concat(all_events, ignore_index=True)
+        validate_statsbomb_events(events_df, context=f"StatsBomb events {comp_id}/{season_id}")
+        return events_df
     return pd.DataFrame()
 
 def load_match_frames(match_id):
@@ -33,7 +36,9 @@ def load_match_frames(match_id):
         frames_data = sb.frames(match_id=match_id, fmt='dict')
         if isinstance(frames_data, dict):
             frames_data = list(frames_data.values())
-        return pd.DataFrame(frames_data)
+        frames_df = pd.DataFrame(frames_data)
+        validate_statsbomb_frames(frames_df, context=f"StatsBomb 360 frames {match_id}")
+        return frames_df
     except Exception as e:
         logger.warning(f"Could not load 360 frames for match {match_id}: {e}")
         return pd.DataFrame()
@@ -94,6 +99,7 @@ def load_all_competitions(competition_names=None):
             logger.info(f"Events not cached for {comp_name}, downloading...")
             download_all(comp_name)
             events_df = pd.read_parquet(events_path)
+        validate_statsbomb_events(events_df, context=f"{comp_name} events")
         
         # Load frames
         frames_dir = RAW_DATA_DIR / comp_name / "frames"
@@ -105,6 +111,7 @@ def load_all_competitions(competition_names=None):
                 try:
                     frames_df = pd.read_pickle(frame_file)
                     if not frames_df.empty:
+                        validate_statsbomb_frames(frames_df, context=f"{comp_name} match {match_id} frames")
                         frames_dict[match_id] = frames_df
                 except Exception as e:
                     logger.warning(f"Could not load frames for match {match_id}: {e}")

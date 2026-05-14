@@ -33,6 +33,30 @@ MODEL_SETTINGS = {
 
 MIN_EVENTS_THRESHOLD = 20  # Minimum pressure events for leaderboard inclusion
 
+MODEL_FEATURE_COLUMNS = [
+    "dist_nearest_opp",
+    "dist_2nd_nearest_opp",
+    "opps_within_1yd",
+    "opps_within_2yd",
+    "opps_within_4yd",
+    "angle_nearest_opp",
+    "coverage_arc",
+    "voronoi_area",
+    "n_free_teammates",
+    "max_free_triangle_area",
+    "dist_nearest_free_teammate",
+    "angle_nearest_free_teammate",
+    "pitch_control",
+    "opp_density_5yd",
+    "has_progressive_option",
+    "xt_value",
+    "bc_x",
+    "bc_y",
+    "game_state_diff",
+    "minutes_elapsed",
+    "match_period",
+]
+
 # Domain Spatial Constants
 SPATIAL_CONFIG = {
     "pitch_length": 120.0,
@@ -51,4 +75,3 @@ SPATIAL_CONFIG = {
     "progressive_distance": 5.0,
     "carry_lookahead_events": 5,
 }
-

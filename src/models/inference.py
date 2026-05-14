@@ -5,6 +5,7 @@ import pickle
 import logging
 from scipy.special import expit
 from config import MODEL_TRACES_DIR, TABLES_DIR, PROCESSED_DATA_DIR, SPATIAL_CONFIG, MIN_EVENTS_THRESHOLD
+from src.data.validation import validate_model_dataset
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -45,6 +46,7 @@ def run_posterior_analysis():
         max_value = scaler_data['max_value']
     
     df = pd.read_parquet(dataset_path)
+    validate_model_dataset(df, feature_names, context="posterior analysis dataset")
     event_counts = df['player_id'].value_counts().to_dict()
     
     post = trace.posterior
@@ -164,7 +166,7 @@ def run_posterior_analysis():
                 'best_under_scenario': best_scenario
             })
         except Exception as e:
-            logger.debug(f"Error processing {idx}: {e}")
+            logger.debug(f"Error processing player {player_id}: {e}")
             
     lb_df = pd.DataFrame(leaderboard).sort_values(by='mean_PRS', ascending=False)
     

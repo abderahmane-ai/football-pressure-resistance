@@ -7,6 +7,7 @@ import logging
 import pickle
 import arviz as az
 from config import TABLES_DIR, MODEL_TRACES_DIR, PROCESSED_DATA_DIR, SPATIAL_CONFIG, MIN_EVENTS_THRESHOLD
+from src.data.validation import validate_model_dataset
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -36,16 +37,17 @@ def run_cross_validation():
     _require_paths(holdout_path, trace_path, mapping_path, scaler_path, leaderboard_path)
     
     holdout_df = pd.read_parquet(holdout_path)
+    with open(scaler_path, "rb") as f:
+        scaler_data = pickle.load(f)
+    feature_names = scaler_data['features']
+    validate_model_dataset(holdout_df, feature_names, context="holdout pressure dataset")
     holdout_df = holdout_df[holdout_df['dist_nearest_opp'] <= SPATIAL_CONFIG['tight_pressure_radius']]
     
     trace = az.from_netcdf(trace_path)
     with open(mapping_path, "rb") as f:
         mappings = pickle.load(f)
-    with open(scaler_path, "rb") as f:
-        scaler_data = pickle.load(f)
     
     scaler = scaler_data['scaler']
-    feature_names = scaler_data['features']
     max_value = scaler_data['max_value']
     pos_mapping = mappings['position']
     
