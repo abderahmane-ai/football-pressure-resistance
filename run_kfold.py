@@ -12,6 +12,17 @@ logger = logging.getLogger(__name__)
 
 COMPS = ["Euro_2020", "Euro_2024", "World_Cup_2022", "Bundesliga_2024"]
 
+
+def get_python_cmd():
+    """
+    Resolve Python launcher in a cross-platform-safe way.
+    - Prefer the current interpreter (`sys.executable`) when available.
+    - Fall back to `python` on Windows and `python3` elsewhere.
+    """
+    if sys.executable:
+        return sys.executable
+    return "python" if os.name == "nt" else "python3"
+
 def check_optimization():
     """Warn if JAX/NumPyro is unavailable; fall back to PyMC default sampler."""
     if find_spec("numpyro") and find_spec("jax"):
@@ -33,6 +44,8 @@ def run_step(step_cmd, env):
 def main():
     logger.info("Starting 4-Fold Cross Validation Pipeline")
     check_optimization()
+    python_cmd = get_python_cmd()
+    logger.info(f"Using Python executable: {python_cmd}")
     
     results = []
     
@@ -45,10 +58,10 @@ def main():
         env["PRS_HOLDOUT"] = holdout  # Inject holdout fold
         
         steps = [
-            ["python3", "-m", "src.data.builder"],
-            ["python3", "-m", "src.models.bayesian"],
-            ["python3", "-m", "src.models.inference"],
-            ["python3", "-m", "src.models.validation"]
+            [python_cmd, "-m", "src.data.builder"],
+            [python_cmd, "-m", "src.models.bayesian"],
+            [python_cmd, "-m", "src.models.inference"],
+            [python_cmd, "-m", "src.models.validation"]
         ]
         
         start_time = time.time()

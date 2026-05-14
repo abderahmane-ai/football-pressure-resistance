@@ -116,39 +116,57 @@ pip install jax-metal        # Mac GPU backend
 
 ### Option A — Full 4-Fold Cross-Validation (recommended)
 ```bash
+# macOS / Linux
 python3 run_kfold.py
+
+# Windows
+python run_kfold.py
 ```
 This sequentially rotates through all 4 competitions as holdout and reports aggregate Pearson correlation and AUC.
 
 ### Option B — Single Run
 ```bash
 # 1. Download, filter, and build feature dataset (parallelised)
-python3 -m src.data.builder
+# macOS / Linux: python3 -m src.data.builder
+# Windows:      python -m src.data.builder
 
 # 2. Fit hierarchical Hurdle model (MCMC)
-python3 -m src.models.bayesian
+# macOS / Linux: python3 -m src.models.bayesian
+# Windows:      python -m src.models.bayesian
 
 # 3. Extract leaderboard + scenario profiles
-python3 -m src.models.inference
+# macOS / Linux: python3 -m src.models.inference
+# Windows:      python -m src.models.inference
 
 # 4. Validate via out-of-sample residual correlation
-python3 -m src.models.validation
+# macOS / Linux: python3 -m src.models.validation
+# Windows:      python -m src.models.validation
 
 # 5. Variance decomposition + marginal effects
-python3 -m src.visualization.interpretability
+# macOS / Linux: python3 -m src.visualization.interpretability
+# Windows:      python -m src.visualization.interpretability
 
 # 6. Generate publication figures
-python3 -m src.visualization.plots
+# macOS / Linux: python3 -m src.visualization.plots
+# Windows:      python -m src.visualization.plots
 ```
 
 ### Holdout Competition
 Controlled via the `PRS_HOLDOUT` environment variable (default: `Euro_2020`). Must be set before running the full pipeline:
 ```bash
 export PRS_HOLDOUT=World_Cup_2022
+# macOS / Linux
 python3 -m src.data.builder
 python3 -m src.models.bayesian
 python3 -m src.models.inference
 python3 -m src.models.validation
+
+# Windows (PowerShell)
+$env:PRS_HOLDOUT="World_Cup_2022"
+python -m src.data.builder
+python -m src.models.bayesian
+python -m src.models.inference
+python -m src.models.validation
 ```
 
 ---
