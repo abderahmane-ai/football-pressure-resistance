@@ -16,7 +16,7 @@ Traditional metrics evaluate passes under pressure but fail to account for spati
 | **Tight-pressure filter (≤5 yards)** | Eliminates token pressure events; model only sees genuine close-quarters duels |
 | **One row per carrier action** | Collapses multiple defender `Pressure` logs linked to the same action, because freeze-frame geometry already captures pressure density |
 | **Raw `bc_x`, `bc_y` coordinates** | Replaces an ordinal zone integer that falsely implied a linear relationship across pitch thirds |
-| **Parallelised data build** | `ThreadPoolExecutor` across matches; API calls and numpy operations both release the GIL for significant speedup |
+| **Parallelised data build** | `ThreadPoolExecutor` across matches; StatsBomb API calls (I/O) and NumPy/Shapely operations natively release the GIL for true parallelism without process-serialization overhead |
 | **Out-of-sample residual correlation** | Strong validation check for whether PRS is stable and transferable rather than in-sample noise |
 
 ---
@@ -27,12 +27,17 @@ Traditional metrics evaluate passes under pressure but fail to account for spati
 pressure_resistance/
 ├── config.py                        # All constants, paths, MCMC settings
 ├── run_kfold.py                     # 4-fold cross-validation orchestrator
+├── data/
+│   ├── xt_grid.json                 # Karun Singh xT grid (loaded dynamically)
+│   ├── raw/                         # Cached StatsBomb data
+│   └── processed/                   # Built datasets
 └── src/
     ├── data/
     │   ├── loader.py                # StatsBomb API caching + I/O
     │   ├── pairing.py               # Links Pressure → ball-carrier events + 360 frames
     │   ├── labels.py                # Defines success for Pass/Carry/Dribble
-    │   └── builder.py               # Full pipeline: game state, parallel feature extraction
+    │   ├── builder.py               # Full pipeline: game state, parallel feature extraction
+    │   └── validation.py            # Explicit data validation contracts
     ├── features/
     │   ├── geometry.py              # Gaussian pitch control, xT grid, Voronoi, angular span
     │   └── spatial.py               # Freeze-frame → 21-feature vector
@@ -44,6 +49,18 @@ pressure_resistance/
         ├── interpretability.py      # Variance decomposition, ICE curves, marginal effects
         └── plots.py                 # Publication-ready figures
 ```
+
+### Data Validation
+
+The pipeline includes explicit validation contracts to ensure data integrity at each stage:
+
+| Function | Purpose |
+|----------|---------|
+| `validate_statsbomb_events()` | Checks required columns, nulls, duplicates in raw event data |
+| `validate_statsbomb_frames()` | Validates 360 freeze-frame data integrity |
+| `validate_model_dataset()` | Ensures processed dataset has required features + valid labels |
+
+Raises `DataValidationError` with actionable messages if contracts are violated.
 
 ---
 
@@ -192,9 +209,12 @@ python -m src.models.validation
 | `outputs/tables/holdout_correlation_data.csv` | Per-player training PRS vs holdout residuals |
 | `outputs/tables/holdout_metrics.csv` | Pearson r, p-value, AUC |
 | `outputs/tables/kfold_results.csv` | Aggregate 4-fold validation results |
+| `outputs/tables/marginal_dist.csv` | *(Optional)* Population marginal expected value by opponent distance |
+| `outputs/tables/marginal_arc.csv` | *(Optional)* Population marginal expected value by opponent coverage arc |
+| `outputs/tables/ice_curves.csv` | *(Optional)* Individual Conditional Expectation curves |
 | `outputs/figures/1_leaderboard_2D.png` | Ball Security vs Value Retention scatter (top 30) |
 | `outputs/figures/2_feature_importance.png` | Feature coefficient bar chart (both sub-models) |
-| `outputs/figures/3_marginal_dist.png` | Population marginal effect — nearest opponent distance |
-| `outputs/figures/3_marginal_arc.png` | Population marginal effect — coverage arc |
+| `outputs/figures/3_marginal_dist.png` | *(Optional)* Population marginal effect — nearest opponent distance |
+| `outputs/figures/3_marginal_arc.png` | *(Optional)* Population marginal effect — coverage arc |
 | `outputs/figures/7_stability_scatter.png` | Training PRS vs holdout residuals |
 | `outputs/model_traces/pooled_trace.nc` | Full MCMC posterior (NetCDF) |
