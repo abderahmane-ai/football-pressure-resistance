@@ -5,29 +5,26 @@ import hashlib
 import logging
 import os
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
-from concurrent.futures import ThreadPoolExecutor
 from statsbombpy import sb
 from tqdm import tqdm
 
-from config import (
-    PROCESSED_DATA_DIR,
-    COMPETITIONS,
-    CROSS_VALIDATION_HOLDOUT,
-    SPATIAL_CONFIG,
-    MODEL_FEATURE_COLUMNS,
-)
+from config import (COMPETITIONS, CROSS_VALIDATION_HOLDOUT,
+                    MODEL_FEATURE_COLUMNS, PROCESSED_DATA_DIR, SPATIAL_CONFIG)
+from src.data.labels import define_success
 from src.data.loader import load_all_competitions
 from src.data.pairing import pair_pressure_with_ball_carrier
-from src.data.labels import define_success
-from src.data.validation import validate_model_dataset, validate_statsbomb_events, validate_statsbomb_frames
-from src.features.spatial import extract_spatial_features_from_frame
+from src.data.validation import (validate_model_dataset,
+                                 validate_statsbomb_events,
+                                 validate_statsbomb_frames)
 from src.features.geometry import xt_value
+from src.features.spatial import extract_spatial_features_from_frame
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

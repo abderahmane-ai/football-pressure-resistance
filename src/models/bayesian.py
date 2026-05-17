@@ -13,7 +13,8 @@ import pandas as pd
 import pymc as pm
 from sklearn.preprocessing import StandardScaler
 
-from config import PROCESSED_DATA_DIR, MODEL_TRACES_DIR, MODEL_SETTINGS, MODEL_FEATURE_COLUMNS
+from config import (MODEL_FEATURE_COLUMNS, MODEL_SETTINGS, MODEL_TRACES_DIR,
+                    PROCESSED_DATA_DIR)
 from src.data.validation import DataValidationError, validate_model_dataset
 
 warnings.simplefilter(action="ignore", category=FutureWarning)

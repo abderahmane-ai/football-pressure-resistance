@@ -11,7 +11,8 @@ import numpy as np
 import pandas as pd
 from scipy.special import expit
 
-from config import MODEL_TRACES_DIR, TABLES_DIR, PROCESSED_DATA_DIR, SPATIAL_CONFIG, MIN_EVENTS_THRESHOLD
+from config import (MIN_EVENTS_THRESHOLD, MODEL_TRACES_DIR, PROCESSED_DATA_DIR,
+                    SPATIAL_CONFIG, TABLES_DIR)
 from src.data.validation import validate_model_dataset
 
 logging.basicConfig(level=logging.INFO)

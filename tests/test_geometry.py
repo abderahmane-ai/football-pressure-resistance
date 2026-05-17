@@ -1,8 +1,8 @@
 """Tests for src.features.geometry.angular_span."""
 import numpy as np
 
-from src.features.geometry import angular_span
 from config import SPATIAL_CONFIG
+from src.features.geometry import angular_span
 
 RADIUS = 3.0
 PLAYER_WIDTH = SPATIAL_CONFIG['player_width']

@@ -13,7 +13,8 @@ from scipy.special import expit
 from scipy.stats import pearsonr, spearmanr
 from sklearn.metrics import roc_auc_score
 
-from config import TABLES_DIR, MODEL_TRACES_DIR, PROCESSED_DATA_DIR, SPATIAL_CONFIG, MIN_EVENTS_THRESHOLD
+from config import (MIN_EVENTS_THRESHOLD, MODEL_TRACES_DIR, PROCESSED_DATA_DIR,
+                    SPATIAL_CONFIG, TABLES_DIR)
 from src.data.validation import validate_model_dataset
 
 logging.basicConfig(level=logging.INFO)

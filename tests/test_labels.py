@@ -4,7 +4,6 @@ import pandas as pd
 
 from src.data.labels import define_success
 
-
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def make_events(*rows):

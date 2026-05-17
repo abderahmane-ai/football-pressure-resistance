@@ -1,12 +1,15 @@
 import logging
-import arviz as az
-import pandas as pd
-import numpy as np
 import pickle
-from scipy.special import expit
 import warnings
+
+import arviz as az
+import numpy as np
+import pandas as pd
+from scipy.special import expit
+
 warnings.simplefilter(action='ignore', category=FutureWarning)
-from config import MODEL_TRACES_DIR, TABLES_DIR, PROCESSED_DATA_DIR, SPATIAL_CONFIG
+from config import (MODEL_TRACES_DIR, PROCESSED_DATA_DIR, SPATIAL_CONFIG,
+                    TABLES_DIR)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

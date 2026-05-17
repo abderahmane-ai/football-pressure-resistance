@@ -1,8 +1,10 @@
-import matplotlib.pyplot as plt
-import seaborn as sns
-import pandas as pd
-from config import TABLES_DIR, FIGURES_DIR
 import logging
+
+import matplotlib.pyplot as plt
+import pandas as pd
+import seaborn as sns
+
+from config import FIGURES_DIR, TABLES_DIR
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

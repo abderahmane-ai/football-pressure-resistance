@@ -9,7 +9,6 @@ from sklearn.preprocessing import StandardScaler
 
 from src.models import inference
 
-
 FEATURES = ["dist_nearest_opp", "angle_nearest_opp", "coverage_arc"]
 
 
