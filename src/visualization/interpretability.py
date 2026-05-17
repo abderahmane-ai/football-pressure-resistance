@@ -11,7 +11,6 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 from config import (MODEL_TRACES_DIR, PROCESSED_DATA_DIR, SPATIAL_CONFIG,
                     TABLES_DIR)
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def run_interpretability_analysis():

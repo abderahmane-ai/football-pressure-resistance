@@ -26,7 +26,6 @@ from src.data.validation import (validate_model_dataset,
 from src.features.geometry import xt_value
 from src.features.spatial import extract_spatial_features_from_frame
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 N_WORKERS: int = min(os.cpu_count() or 4, 8)
@@ -311,19 +310,23 @@ def compute_intended_xt(item: dict[str, Any], match_events: pd.DataFrame) -> flo
         else:
             return None
 
+    # pyrefly: ignore [unsupported-operation]
     next_xt: float = xt_value(bc_loc[0], bc_loc[1])
 
     if bc_event["type"] == "Pass":
         end_loc = bc_event.get("pass_end_location")
         if _is_valid_loc(end_loc):
+            # pyrefly: ignore [unsupported-operation]
             next_xt = xt_value(end_loc[0], end_loc[1])
     elif bc_event["type"] == "Carry":
         end_loc = bc_event.get("carry_end_location")
         if _is_valid_loc(end_loc):
+            # pyrefly: ignore [unsupported-operation]
             next_xt = xt_value(end_loc[0], end_loc[1])
     elif bc_idx + 1 < len(match_events):
         next_loc = match_events.iloc[bc_idx + 1].get("location")
         if _is_valid_loc(next_loc):
+            # pyrefly: ignore [unsupported-operation]
             next_xt = xt_value(next_loc[0], next_loc[1])
 
     return float(next_xt)

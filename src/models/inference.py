@@ -15,7 +15,6 @@ from config import (MIN_EVENTS_THRESHOLD, MODEL_TRACES_DIR, PROCESSED_DATA_DIR,
                     SPATIAL_CONFIG, TABLES_DIR)
 from src.data.validation import validate_model_dataset
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -60,6 +59,7 @@ def run_posterior_analysis() -> None:
     validate_model_dataset(df, feature_names, context="posterior analysis dataset")
     event_counts: dict[Any, int] = df["player_id"].value_counts().to_dict()
 
+    # pyrefly: ignore [missing-attribute]
     post = trace.posterior
 
     # Success / Ball Security parameters

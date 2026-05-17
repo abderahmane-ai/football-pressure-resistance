@@ -60,8 +60,10 @@ def _ensure_columns(df: pd.DataFrame, required_columns: Iterable[str], context: 
 def _is_valid_location(value: object) -> bool:
     if value is None or (isinstance(value, float) and math.isnan(value)):
         return True
+    # pyrefly: ignore [bad-argument-type]
     if not hasattr(value, "__len__") or len(value) < 2:
         return False
+    # pyrefly: ignore [bad-index]
     x, y = value[0], value[1]
     return pd.notna(x) and pd.notna(y)
 

@@ -17,7 +17,6 @@ from config import (MIN_EVENTS_THRESHOLD, MODEL_TRACES_DIR, PROCESSED_DATA_DIR,
                     SPATIAL_CONFIG, TABLES_DIR)
 from src.data.validation import validate_model_dataset
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -62,7 +61,7 @@ def run_cross_validation() -> None:
     max_value: float = scaler_data["max_value"]
     pos_mapping: dict[int, str] = mappings["position"]
 
-    post = trace.posterior
+    post = trace.posterior  # type: ignore[attr-defined]
     # Success params
     alpha_succ: np.ndarray = post["alpha_succ"].values.flatten()
     beta_succ: np.ndarray = post["beta_succ"].values.reshape(-1, len(feature_names))

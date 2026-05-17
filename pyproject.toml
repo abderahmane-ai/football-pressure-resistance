@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=70", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "pressure-resistance"
+version = "0.1.0"
+description = "Research-grade Bayesian hierarchical framework for measuring football player composure under pressure using StatsBomb 360 data."
+requires-python = ">=3.10"
+readme = "README.md"
+license = { text = "MIT" }
+dependencies = [
+    "pandas>=2.2",
+    "numpy>=1.26",
+    "scipy>=1.12",
+    "scikit-learn>=1.4",
+    "matplotlib>=3.8",
+    "seaborn>=0.13",
+    "pymc>=5.10",
+    "arviz>=0.17",
+    "statsbombpy>=1.13",
+    "tqdm>=4.66",
+    "shapely>=2.0",
+    "pyarrow>=15",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "mypy", "ruff", "isort"]
+accelerated = ["numpyro", "jax"]
+
+# ── Pytest ────────────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+# ── Ruff (linter) ─────────────────────────────────────────────────────────────
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line too long — handled per-file where necessary
+]
+
+# ── isort ─────────────────────────────────────────────────────────────────────
+[tool.isort]
+profile = "black"
+line_length = 100
+
+# ── Mypy ─────────────────────────────────────────────────────────────────────
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_ignores = true
+ignore_missing_imports = true   # third-party stubs (numpy, pandas, etc.) not always available
+disallow_untyped_defs = true

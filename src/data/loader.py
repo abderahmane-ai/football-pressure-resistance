@@ -15,7 +15,6 @@ from src.data.validation import (validate_statsbomb_events,
 
 warnings.filterwarnings("ignore", message="credentials were not supplied.*")
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -28,6 +27,7 @@ def load_competition_events(comp_id: int, season_id: int) -> pd.DataFrame:
         try:
             events = sb.events(match_id=match_id)
             events["match_id"] = match_id
+            # pyrefly: ignore [bad-argument-type]
             all_events.append(events)
         except Exception as e:
             logger.warning(

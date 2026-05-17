@@ -19,7 +19,6 @@ from src.data.validation import DataValidationError, validate_model_dataset
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -134,10 +133,10 @@ def fit_pooled_model() -> az.InferenceData | None:
 
     logger.info("Loaded dataset: %d observations, %d features", len(df), len(available_features))
 
-    X: np.ndarray = df[available_features].values
+    X: np.ndarray = np.asarray(df[available_features].values)
 
-    y_success: np.ndarray = df["success"].values.astype(int)
-    y_value: np.ndarray = df["value_preserved"].values
+    y_success: np.ndarray = np.asarray(df["success"].values).astype(int)
+    y_value: np.ndarray = np.asarray(df["value_preserved"].values)
     max_value: float = float(y_value.max()) if y_value.max() > 0 else 0.15
 
     epsilon: float = 1e-6
@@ -165,9 +164,13 @@ def fit_pooled_model() -> az.InferenceData | None:
     opp_team_cats = df["opponent_team_id"].astype("category")
     pos_cats = df["position_group"].astype("category")
 
+    # pyrefly: ignore [bad-assignment]
     player_idx: np.ndarray = player_cats.cat.codes.values
+    # pyrefly: ignore [bad-assignment]
     comp_idx: np.ndarray = comp_cats.cat.codes.values
+    # pyrefly: ignore [bad-assignment]
     opp_idx: np.ndarray = opp_team_cats.cat.codes.values
+    # pyrefly: ignore [bad-assignment]
     pos_idx: np.ndarray = pos_cats.cat.codes.values
 
     n_players: int = len(player_cats.cat.categories)
@@ -199,7 +202,7 @@ def fit_pooled_model() -> az.InferenceData | None:
     opp_idx_val: np.ndarray = opp_idx[mask]
     pos_idx_val: np.ndarray = pos_idx[mask]
 
-    with pm.Model():
+    with pm.Model():  # type: ignore[attr-defined]
         # --- BALL SECURITY MODEL (Logistic) ---
         X_data_succ = pm.Data("X_succ", X_scaled)
         pid_succ = pm.Data("pid_succ", player_idx)
@@ -305,7 +308,7 @@ def fit_pooled_model() -> az.InferenceData | None:
             )
 
     trace_path: Path = MODEL_TRACES_DIR / "pooled_trace.nc"
-    trace.to_netcdf(trace_path)
+    trace.to_netcdf(str(trace_path))
     logger.info("Saved trace to %s", trace_path)
 
     return trace
