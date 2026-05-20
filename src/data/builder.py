@@ -359,7 +359,7 @@ def build_all_datasets(include_holdout: bool = False) -> pd.DataFrame | None:
 
         match_ids = events_df["match_id"].unique()
 
-        # Pre-fetch goalkeeper IDs in parallel (I/O-bound API calls)
+        # Pre-fetch goalkeeper IDs (I/O-bound API calls parallelised with threads)
         gk_ids_by_match: dict[int, set[int]] = {}
         with ThreadPoolExecutor(max_workers=N_WORKERS) as ex:
             futures = {ex.submit(get_goalkeeper_ids, mid): mid for mid in match_ids}
@@ -428,7 +428,7 @@ def build_holdout_dataset() -> None:
 
         match_ids = events_df["match_id"].unique()
 
-        # Pre-fetch GK IDs in parallel
+        # Pre-fetch GK IDs (I/O-bound API calls parallelised with threads)
         gk_ids_by_match: dict[int, set[int]] = {}
         with ThreadPoolExecutor(max_workers=N_WORKERS) as ex:
             futures = {ex.submit(get_goalkeeper_ids, mid): mid for mid in match_ids}

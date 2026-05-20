@@ -4,9 +4,9 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+from typing import Sequence
 
 import numpy as np
-from numpy.typing import ArrayLike
 from shapely.geometry import LineString, MultiPoint, Point, Polygon
 from shapely.ops import voronoi_diagram
 
@@ -14,10 +14,9 @@ from config import SPATIAL_CONFIG
 
 logger = logging.getLogger(__name__)
 
-# ── xT grid loading ──────────────────────────────────────────────────────────
-# Karun Singh 8×12 xT grid.  Loaded from a JSON sidecar file so the values are
-# data (editable, versionable) rather than baked into source code.  Falls back
-# to the inline default if the JSON is absent.
+# ── xT grid ─────────────────────────────────────────────────────────────────
+# Karun Singh 8×12 grid loaded from data/xt_grid.json at import time.
+# Falls back to the inline default if the file is absent or malformed.
 
 _XT_GRID_DEFAULT: list[list[float]] = [
     [0.00638, 0.00779, 0.00844, 0.00977, 0.01126, 0.01248, 0.01473, 0.01745, 0.02122, 0.02756, 0.03485, 0.03792],
@@ -63,12 +62,12 @@ def point_in_pitch(x: float, y: float) -> bool:
     return 0 <= x <= SPATIAL_CONFIG["pitch_length"] and 0 <= y <= SPATIAL_CONFIG["pitch_width"]
 
 
-def _gaussian_influence(point: np.ndarray, players: ArrayLike, max_radius: float = 15.0) -> float:
+def _gaussian_influence(point: np.ndarray, players: Sequence[object], max_radius: float = 15.0) -> float:
     """Compute Gaussian influence of a list of players at a specific point."""
     if len(players) == 0:
         return 0.0
-    players = np.asarray(players)
-    dists = np.linalg.norm(players - point, axis=1)
+    arr = np.asarray(players, dtype=float)
+    dists = np.linalg.norm(arr - point, axis=1)
     close_mask = dists <= max_radius
     if not np.any(close_mask):
         return 0.0
@@ -79,18 +78,18 @@ def _gaussian_influence(point: np.ndarray, players: ArrayLike, max_radius: float
 
 
 def pitch_control_value(
-    bc: ArrayLike,
-    teammates: ArrayLike,
-    opponents: ArrayLike,
+    bc: Sequence[float],
+    teammates: Sequence[object],
+    opponents: Sequence[object],
 ) -> float:
     """
     Gaussian pitch control model at ball-carrier location.
 
     Returns value in [-1, 1] representing net control (positive = teammate dominance).
     """
-    bc = np.asarray(bc, dtype=float)
-    tm_influence = _gaussian_influence(bc, teammates)
-    opp_influence = _gaussian_influence(bc, opponents)
+    bc_arr = np.asarray(bc, dtype=float)
+    tm_influence = _gaussian_influence(bc_arr, teammates)
+    opp_influence = _gaussian_influence(bc_arr, opponents)
 
     total = tm_influence + opp_influence
     if total == 0:
@@ -113,7 +112,7 @@ def xt_value(x: float, y: float) -> float:
     return float(XT_GRID_VALUES[y_idx, x_idx])
 
 
-def voronoi_area(ball_carrier: ArrayLike, all_players: list[ArrayLike]) -> float:
+def voronoi_area(ball_carrier: Sequence[float], all_players: list[Sequence[float]]) -> float:
     """Calculate the area of the Voronoi cell for the ball carrier, clipped to the pitch."""
     pitch_len: float = SPATIAL_CONFIG["pitch_length"]
     pitch_wid: float = SPATIAL_CONFIG["pitch_width"]
@@ -123,27 +122,28 @@ def voronoi_area(ball_carrier: ArrayLike, all_players: list[ArrayLike]) -> float
         (pitch_len, pitch_wid), (0, pitch_wid),
     ])
 
-    points = np.asarray(all_players)
+    points = np.asarray(all_players, dtype=float)
     if len(points) < 4:
         return _grid_voronoi_area(ball_carrier, all_players)
 
-    mp = MultiPoint(points)
+    mp = MultiPoint(points)  # pyrefly: ignore [bad-argument-type]
 
     try:
         regions = voronoi_diagram(mp, envelope=pitch_polygon)
     except Exception:
         return _grid_voronoi_area(ball_carrier, all_players)
 
-    bc_point = Point(ball_carrier)
+    bc_point = Point(ball_carrier)  # pyrefly: ignore [bad-argument-type]
     for polygon in regions.geoms:
         if polygon.contains(bc_point):
             clipped = polygon.intersection(pitch_polygon)
+            # pyrefly: ignore [unnecessary-type-conversion]
             return float(clipped.area)
 
     return 0.0
 
 
-def _grid_voronoi_area(ball_carrier: ArrayLike, all_players: list[ArrayLike]) -> float:
+def _grid_voronoi_area(ball_carrier: Sequence[float], all_players: list[Sequence[float]]) -> float:
     """Grid-based approximation if Shapely fails or few points."""
     pitch_len: float = SPATIAL_CONFIG["pitch_length"]
     pitch_wid: float = SPATIAL_CONFIG["pitch_width"]
@@ -154,7 +154,7 @@ def _grid_voronoi_area(ball_carrier: ArrayLike, all_players: list[ArrayLike]) ->
     xx, yy = np.meshgrid(xs, ys)
     grid_points = np.c_[xx.ravel(), yy.ravel()]
 
-    all_players_arr = np.asarray(all_players)
+    all_players_arr = np.asarray(all_players, dtype=float)
     if len(all_players_arr) == 0:
         return pitch_len * pitch_wid
 
@@ -163,9 +163,10 @@ def _grid_voronoi_area(ball_carrier: ArrayLike, all_players: list[ArrayLike]) ->
     )
     closest_player_idx = np.argmin(distances, axis=1)
 
+    bc_arr = np.asarray(ball_carrier, dtype=float)
     bc_idx = -1
     for i, p in enumerate(all_players_arr):
-        if np.allclose(p, ball_carrier):
+        if np.allclose(p, bc_arr):
             bc_idx = i
             break
 
@@ -176,10 +177,10 @@ def _grid_voronoi_area(ball_carrier: ArrayLike, all_players: list[ArrayLike]) ->
     return bc_area
 
 
-def angular_span(ball_carrier: ArrayLike, opponents: ArrayLike, radius: float) -> float:
+def angular_span(ball_carrier: Sequence[float], opponents: Sequence[Sequence[float]], radius: float) -> float:
     """Calculate the angular span (coverage arc) of opponents within *radius* of the ball carrier."""
-    bc = np.asarray(ball_carrier)
-    opps = np.asarray(opponents)
+    bc = np.asarray(ball_carrier, dtype=float)
+    opps = np.asarray(opponents, dtype=float)
 
     if len(opps) == 0:
         return 0.0
@@ -195,7 +196,7 @@ def angular_span(ball_carrier: ArrayLike, opponents: ArrayLike, radius: float) -
 
     if len(angles) == 1:
         dist = float(distances[distances <= radius][0])
-        dist = max(dist, 0.01)  # Avoid division by zero
+        dist = max(dist, 0.01)  # Guard against division by zero at point-blank range
         player_width: float = SPATIAL_CONFIG["player_width"]
         return float(2.0 * np.arctan((player_width / 2.0) / dist))
 
@@ -204,13 +205,14 @@ def angular_span(ball_carrier: ArrayLike, opponents: ArrayLike, radius: float) -
     max_gap = float(np.max(gaps))
 
     span = 2 * np.pi - max_gap
+    # pyrefly: ignore [unnecessary-type-conversion]
     return float(span)
 
 
 def lane_unblocked(
-    start_point: ArrayLike,
-    end_point: ArrayLike,
-    opponents: ArrayLike,
+    start_point: Sequence[float],
+    end_point: Sequence[float],
+    opponents: Sequence[Sequence[float]],
     clearance_radius: float | None = None,
 ) -> bool:
     """Check if a passing lane from *start_point* to *end_point* is clear of opponents."""
@@ -220,8 +222,8 @@ def lane_unblocked(
     if len(opponents) == 0:
         return True
 
-    lane = LineString([start_point, end_point])
+    lane = LineString([start_point, end_point])  # pyrefly: ignore [bad-argument-type]
     for opp in opponents:
-        if lane.distance(Point(opp)) <= clearance_radius:
+        if lane.distance(Point(opp)) <= clearance_radius:  # pyrefly: ignore [bad-argument-type]
             return False
     return True

@@ -137,6 +137,7 @@ def run_cross_validation() -> None:
         return
 
     pearson_corr, p_p = pearsonr(merged["mean_PRS"], merged["residual"])
+    # Spearman computed for diagnostic logging only; not persisted to CSV
     spearman_corr, p_s = spearmanr(merged["mean_PRS"], merged["residual"])
 
     logger.info("Stability Analysis (n=%d overlapping players):", len(merged))

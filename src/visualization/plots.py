@@ -1,3 +1,4 @@
+"""Publication-ready figures from PRS model outputs."""
 import logging
 
 import matplotlib.pyplot as plt
@@ -13,7 +14,7 @@ try:
 except AttributeError:
     sns.set_style("whitegrid")
 
-def plot_prs_leaderboard():
+def plot_prs_leaderboard() -> None:
     """Plot top players on a 2D plane: Ball Security vs Value Retention."""
     path = TABLES_DIR / "prs_leaderboard.csv"
     if not path.exists(): return
@@ -46,7 +47,7 @@ def plot_prs_leaderboard():
     plt.close()
     logger.info("Saved 2D Leaderboard plot.")
 
-def plot_feature_importance():
+def plot_feature_importance() -> None:
     """Plot standardized coefficients for spatial features (Turnover vs Value)."""
     path = TABLES_DIR / "feature_importance.csv"
     if not path.exists(): return
@@ -87,7 +88,7 @@ def plot_feature_importance():
     plt.close()
     logger.info("Saved Feature Importance plot.")
 
-def plot_stability_analysis():
+def plot_stability_analysis() -> None:
     """Scatter plot: Training PRS vs Holdout Residuals."""
     path = TABLES_DIR / "holdout_correlation_data.csv"
     if not path.exists(): return
@@ -127,7 +128,7 @@ def plot_stability_analysis():
     plt.close()
     logger.info("Saved Stability Scatter plot.")
 
-def plot_marginal_curves():
+def plot_marginal_curves() -> None:
     """Plot population-level success curves for key features."""
     dist_path = TABLES_DIR / "marginal_dist.csv"
     arc_path = TABLES_DIR / "marginal_arc.csv"

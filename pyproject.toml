@@ -34,6 +34,11 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+addopts = "-p no:logfire"
+filterwarnings = [
+    "ignore:ImportError while loading the `logfire-plugin` Pydantic plugin:UserWarning:pydantic.plugin._schema_validator"
+]
+
 
 # ── Ruff (linter) ─────────────────────────────────────────────────────────────
 [tool.ruff]

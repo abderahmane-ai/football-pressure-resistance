@@ -34,8 +34,8 @@ def check_optimization():
         logger.warning("Continuing in 5 seconds...")
         time.sleep(5)
 
-def run_step(step_cmd, env):
-    """Run a pipeline subprocess; exit on non-zero return code."""
+def run_step(step_cmd: list[str], env: dict[str, str]) -> None:
+    """Run a subprocess pipeline step; exit the process on non-zero return code."""
     process = subprocess.Popen(step_cmd, env=env, stdout=sys.stdout, stderr=subprocess.STDOUT)
     process.communicate()
     if process.returncode != 0:
@@ -56,7 +56,7 @@ def main():
         logger.info(f"{'='*60}")
         
         env = os.environ.copy()
-        env["PRS_HOLDOUT"] = holdout  # Inject holdout fold
+        env["PRS_HOLDOUT"] = holdout
         
         steps = [
             [python_cmd, "-m", "src.data.builder"],

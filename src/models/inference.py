@@ -152,6 +152,13 @@ def run_posterior_analysis() -> None:
             player_name: str = name_lookup.get(player_id, f"ID: {player_id}")
             position_group: str = pos_lookup.get(player_id, "Midfielder")
 
+            if position_group not in pos_mapping.values():
+                logger.warning(
+                    "Player %s (%s) has position group '%s' which is not in model categories %s. "
+                    "Defaulting to 'Midfielder'.",
+                    player_id, player_name, position_group, list(pos_mapping.values())
+                )
+
             player_pos_code: int = next(
                 (code for code, name in pos_mapping.items() if name == position_group),
                 mid_pos_code,

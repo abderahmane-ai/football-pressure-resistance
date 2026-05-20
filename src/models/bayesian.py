@@ -122,7 +122,7 @@ def fit_pooled_model() -> az.InferenceData | None:
     import os
     trace_path: Path = MODEL_TRACES_DIR / "pooled_trace.nc"
     if trace_path.exists() and not os.environ.get("FORCE_RETRAIN", "") == "1":
-        logger.info("Found existing trace at %s. Skipping MCMC sampling (set FORCE_RETRAIN=1 to override).", trace_path)
+        logger.info("Found existing trace at %s. Skipping MCMC (set FORCE_RETRAIN=1 to override).", trace_path)
         return az.from_netcdf(str(trace_path))
 
     dataset_path: Path = PROCESSED_DATA_DIR / "all_pressure_dataset.parquet"
@@ -282,11 +282,9 @@ def fit_pooled_model() -> az.InferenceData | None:
 
         logger.info("Starting MCMC sampling...")
         try:
-            # chain_method='vectorized' uses vmap to run all chains simultaneously
-            # on a single GPU device — correct and fast for single-device setups.
-            # 'parallel' (pmap) requires one device per chain and silently falls
-            # back to sequential when only 1 GPU is present, giving a 4x slowdown.
-            # NOTE: chain_method is a pm.sample() kwarg, NOT a NUTS.__init__ kwarg.
+            # chain_method='vectorized' uses vmap to run all chains simultaneously on one GPU.
+            # 'parallel' (pmap) requires one device per chain and silently falls back to
+            # sequential with a single GPU, giving a 4× slowdown.
             trace = pm.sample(
                 draws=MODEL_SETTINGS["draws"],
                 tune=MODEL_SETTINGS["tune"],
@@ -304,7 +302,7 @@ def fit_pooled_model() -> az.InferenceData | None:
                 "Falling back to default PyMC NUTS sampler (sequential chains to avoid JAX/fork deadlock).",
                 e,
             )
-            # chain_method='sequential' avoids os.fork() which deadlocks when JAX is active.
+            # chain_method='sequential' avoids os.fork() deadlocking when JAX has initialised.
             trace = pm.sample(
                 draws=MODEL_SETTINGS["draws"],
                 tune=MODEL_SETTINGS["tune"],

@@ -27,6 +27,8 @@ Traditional metrics evaluate passes under pressure but fail to account for spati
 pressure_resistance/
 ├── config.py                        # All constants, paths, MCMC settings
 ├── run_kfold.py                     # 4-fold cross-validation orchestrator
+├── modal/
+│   └── modal_run.py                 # Cloud GPU runner via Modal (gitignored)
 ├── data/
 │   ├── xt_grid.json                 # Karun Singh xT grid (loaded dynamically)
 │   ├── raw/                         # Cached StatsBomb data
@@ -70,16 +72,18 @@ Raises `DataValidationError` with actionable messages if contracts are violated.
 |---------|-------------|
 | `dist_nearest_opp` | Euclidean distance to nearest opponent (yards) |
 | `dist_2nd_nearest_opp` | Distance to 2nd nearest opponent |
-| `opps_within_1/2/4yd` | Count of opponents within radius bands |
+| `opps_within_1yd` | Count of opponents within 1 yard |
+| `opps_within_2yd` | Count of opponents within 2 yards |
+| `opps_within_4yd` | Count of opponents within 4 yards |
 | `angle_nearest_opp` | Angle of nearest opponent relative to goal direction |
 | `coverage_arc` | Total angular span blocked by opponents within 3 yds (trigonometric, not hardcoded) |
 | `voronoi_area` | Shapely Voronoi cell area for ball carrier (sq yds), clipped to pitch |
-| `pitch_control` | Gaussian influence ratio at ball-carrier location ∈ [-1, 1] |
-| `opp_density_5yd` | Count of opponents within 5 yards |
 | `n_free_teammates` | Teammates with no opponent within `clear_pass_distance` (2 yds) |
 | `max_free_triangle_area` | Largest triangle area formed by ball carrier + 2 free teammates |
 | `dist_nearest_free_teammate` | Distance to nearest free teammate |
 | `angle_nearest_free_teammate` | Angle to nearest free teammate relative to goal |
+| `pitch_control` | Gaussian influence ratio at ball-carrier location ∈ [-1, 1] |
+| `opp_density_5yd` | Count of opponents within 5 yards |
 | `has_progressive_option` | Binary: ∃ free teammate in higher-xT zone with unblocked lane |
 | `xt_value` | Karun Singh xT at ball-carrier location |
 | `bc_x`, `bc_y` | Raw pitch coordinates (replaces misleading ordinal zone integer) |
@@ -207,7 +211,7 @@ python -m src.models.validation
 | `outputs/tables/feature_importance.csv` | Standardized β coefficients with 90% HDI for both sub-models |
 | `outputs/tables/variance_decomposition.csv` | Variance split: Player Skill / Opp Quality / Competition / Spatial Features |
 | `outputs/tables/holdout_correlation_data.csv` | Per-player training PRS vs holdout residuals |
-| `outputs/tables/holdout_metrics.csv` | Pearson r, p-value, AUC |
+| `outputs/tables/holdout_metrics.csv` | Pearson r, p-value, Spearman r (logged only), AUC, n_players |
 | `outputs/tables/kfold_results.csv` | Aggregate 4-fold validation results |
 | `outputs/tables/marginal_dist.csv` | *(Optional)* Population marginal expected value by opponent distance |
 | `outputs/tables/marginal_arc.csv` | *(Optional)* Population marginal expected value by opponent coverage arc |

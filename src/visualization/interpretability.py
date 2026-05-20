@@ -1,3 +1,4 @@
+"""Posterior interpretability: feature importance, variance decomposition, marginal effects, ICE curves."""
 import logging
 import pickle
 import warnings
@@ -13,7 +14,8 @@ from config import (MODEL_TRACES_DIR, PROCESSED_DATA_DIR, SPATIAL_CONFIG,
 
 logger = logging.getLogger(__name__)
 
-def run_interpretability_analysis():
+
+def run_interpretability_analysis() -> None:
     trace_path = MODEL_TRACES_DIR / "pooled_trace.nc"
     if not trace_path.exists():
         logger.warning(f"Trace not found for interpretability: {trace_path}")
@@ -37,15 +39,16 @@ def run_interpretability_analysis():
     post = trace.posterior
     
     logger.info("=== INTERPRETABILITY ANALYSIS ===")
-    
-    # 1. Feature Importance (Beta)
-    logger.info("\n1. Feature Importance")
+
+    # ── 1. Feature importance ─────────────────────────────────────────────────
+    logger.info("1. Feature Importance")
     beta_succ_summary = az.summary(trace, var_names=['beta_succ'], hdi_prob=0.90)
     beta_val_summary = az.summary(trace, var_names=['beta_val'], hdi_prob=0.90)
     
     beta_succ_summary.index = [f + "_ball_security" for f in feature_names]
     beta_val_summary.index = [f + "_value_retention" for f in feature_names]
     
+    # pyrefly: ignore [no-matching-overload]
     beta_summary = pd.concat([beta_succ_summary, beta_val_summary])
     beta_summary['abs_mean'] = beta_summary['mean'].abs()
     beta_summary = beta_summary.sort_values(by='abs_mean', ascending=False)
@@ -53,14 +56,16 @@ def run_interpretability_analysis():
     TABLES_DIR.mkdir(parents=True, exist_ok=True)
     beta_summary.to_csv(TABLES_DIR / "feature_importance.csv")
     
-    # 2. Variance Decomposition (Corrected for Covariance)
-    logger.info("\n2. Variance Decomposition")
+    # ── 2. Variance decomposition ─────────────────────────────────────────────
+    # True sample variance of the linear predictor (Xβ) captures multi-collinearity
+    # correctly — summing squared βs assumes zero correlation between features.
+    logger.info("2. Variance Decomposition")
     
     df = pd.read_parquet(PROCESSED_DATA_DIR / "all_pressure_dataset.parquet").dropna()
     X = df[feature_names].values
     X_scaled = scaler.transform(X)
     
-    # Turnover Model Variances
+    # Ball security model
     sigma_theta_succ = post['sigma_theta_succ'].values.flatten()
     var_theta_succ = np.mean(sigma_theta_succ**2)
     
@@ -76,7 +81,7 @@ def run_interpretability_analysis():
     
     total_var_succ = var_theta_succ + var_opp_succ + var_comp_succ + var_features_succ
     
-    # Value Retention Model Variances
+    # Value retention model
     sigma_theta_val = post['sigma_theta_val'].values.flatten()
     var_theta_val = np.mean(sigma_theta_val**2)
     
@@ -110,8 +115,8 @@ def run_interpretability_analysis():
     })
     var_df.to_csv(TABLES_DIR / "variance_decomposition.csv", index=False)
     
-    # 3. Population Marginal Effects
-    logger.info("\n3. Population Marginal Effects")
+    # ── 3. Population marginal effects ────────────────────────────────────────
+    logger.info("3. Population Marginal Effects")
     alpha_succ_samples = post['alpha_succ'].values.flatten()
     alpha_val_samples = post['alpha_val'].values.flatten()
     gamma_pos_succ = post['gamma_pos_succ'].values.reshape(-1, len(pos_mapping))
@@ -119,9 +124,10 @@ def run_interpretability_analysis():
     
     mid_pos_code = next((code for code, name in pos_mapping.items() if name == 'Midfielder'), 0)
     
-    def compute_marginal(feat_idx, values_range):
+    def compute_marginal(feat_idx: int, values_range: np.ndarray) -> pd.DataFrame:
+        """Marginalise over all posterior samples at each value of a single feature."""
         results = []
-        # Mean impute all other features
+        # All other features held at their training mean (zero in standardised space)
         scenario_vec = np.zeros(len(feature_names))
         for val in values_range:
             std_val = (val - scaler.mean_[feat_idx]) / scaler.scale_[feat_idx]
@@ -144,7 +150,7 @@ def run_interpretability_analysis():
 
     if 'dist_nearest_opp' in feature_names:
         idx = feature_names.index('dist_nearest_opp')
-        # Capped at training boundary (tight_pressure_radius)
+        # Grid capped at tight_pressure_radius; extrapolating beyond is out-of-distribution
         grid = np.linspace(0.5, SPATIAL_CONFIG['tight_pressure_radius'], 50)
         df_marginal = compute_marginal(idx, grid)
         df_marginal.to_csv(TABLES_DIR / "marginal_dist.csv", index=False)
@@ -155,8 +161,8 @@ def run_interpretability_analysis():
         df_marginal = compute_marginal(idx, grid)
         df_marginal.to_csv(TABLES_DIR / "marginal_arc.csv", index=False)
     
-    # 4. ICE Curves (Individual Conditional Expectation)
-    logger.info("\n4. ICE Curves for Top/Bottom Players")
+    # ── 4. ICE curves ─────────────────────────────────────────────────────────
+    logger.info("4. ICE Curves for Top/Bottom Players")
     lb_path = TABLES_DIR / "prs_leaderboard.csv"
     if lb_path.exists():
         lb_df = pd.read_csv(lb_path)
@@ -184,7 +190,7 @@ def run_interpretability_analysis():
         
         if 'dist_nearest_opp' in feature_names:
             feat_idx = feature_names.index('dist_nearest_opp')
-            # Capped at training boundary; beyond 5 yds is out-of-distribution
+            # Grid capped at tight_pressure_radius; extrapolating beyond is out-of-distribution
             max_dist = SPATIAL_CONFIG['tight_pressure_radius']
             dist_grid = np.linspace(0.5, max_dist, 50)
             
