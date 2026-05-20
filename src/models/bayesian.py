@@ -119,6 +119,12 @@ def fit_pooled_model() -> az.InferenceData | None:
     """
     Fit a hurdle model separating Ball Security from Value Retention.
     """
+    import os
+    trace_path: Path = MODEL_TRACES_DIR / "pooled_trace.nc"
+    if trace_path.exists() and not os.environ.get("FORCE_RETRAIN", "") == "1":
+        logger.info("Found existing trace at %s. Skipping MCMC sampling (set FORCE_RETRAIN=1 to override).", trace_path)
+        return az.from_netcdf(str(trace_path))
+
     dataset_path: Path = PROCESSED_DATA_DIR / "all_pressure_dataset.parquet"
     if not dataset_path.exists():
         logger.error(
@@ -280,6 +286,7 @@ def fit_pooled_model() -> az.InferenceData | None:
             # on a single GPU device — correct and fast for single-device setups.
             # 'parallel' (pmap) requires one device per chain and silently falls
             # back to sequential when only 1 GPU is present, giving a 4x slowdown.
+            # NOTE: chain_method is a pm.sample() kwarg, NOT a NUTS.__init__ kwarg.
             trace = pm.sample(
                 draws=MODEL_SETTINGS["draws"],
                 tune=MODEL_SETTINGS["tune"],
@@ -287,22 +294,24 @@ def fit_pooled_model() -> az.InferenceData | None:
                 target_accept=MODEL_SETTINGS["target_accept"],
                 random_seed=MODEL_SETTINGS["random_seed"],
                 nuts_sampler=MODEL_SETTINGS["nuts_sampler"],
-                nuts_sampler_kwargs={"chain_method": "vectorized"},
+                chain_method="vectorized",
                 return_inferencedata=True,
                 progressbar=True,
             )
         except Exception as e:
             logger.warning(
                 "numpyro vectorized sampling failed: %s. "
-                "Falling back to default PyMC NUTS sampler.",
+                "Falling back to default PyMC NUTS sampler (sequential chains to avoid JAX/fork deadlock).",
                 e,
             )
+            # chain_method='sequential' avoids os.fork() which deadlocks when JAX is active.
             trace = pm.sample(
                 draws=MODEL_SETTINGS["draws"],
                 tune=MODEL_SETTINGS["tune"],
                 chains=MODEL_SETTINGS["chains"],
                 target_accept=MODEL_SETTINGS["target_accept"],
                 random_seed=MODEL_SETTINGS["random_seed"],
+                chain_method="sequential",
                 return_inferencedata=True,
                 progressbar=True,
             )
