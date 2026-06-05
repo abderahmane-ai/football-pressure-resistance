@@ -48,9 +48,21 @@ def main():
     python_cmd = get_python_cmd()
     logger.info(f"Using Python executable: {python_cmd}")
 
+    single_holdout = os.environ.get("PRS_HOLDOUT")
+    if single_holdout:
+        if single_holdout not in COMPS:
+            logger.error(f"Invalid holdout '{single_holdout}'. Must be one of {COMPS}")
+            sys.exit(1)
+        comps_to_run = [single_holdout]
+        logger.info(f"Running single holdout: {single_holdout}")
+    else:
+        comps_to_run = COMPS
+        logger.info(f"Running full cross-validation over all comps: {comps_to_run}")
+
     results = []
 
-    for fold, holdout in enumerate(COMPS):
+    for holdout in comps_to_run:
+        fold = COMPS.index(holdout)
         logger.info(f"{'='*60}")
         logger.info(f"FOLD {fold + 1}/4: Holdout = {holdout}")
         logger.info(f"{'='*60}")
@@ -60,7 +72,7 @@ def main():
         
         # Check if trace already exists on the persistent volume to avoid rerunning MCMC (55 min/fold)
         trace_file = Path("outputs/model_traces") / f"pooled_trace_{holdout}.nc"
-        if trace_file.exists():
+        if trace_file.exists() and os.environ.get("FORCE_RETRAIN", "") != "1":
             logger.info(f"Trace for {holdout} already exists at {trace_file}. Skipping MCMC sampling for this fold.")
             env["FORCE_RETRAIN"] = "0"
         else:
@@ -82,7 +94,7 @@ def main():
         fold_time = time.time() - start_time
         logger.info(f"Fold {fold + 1} completed in {fold_time / 60:.1f} minutes.")
 
-        metrics_file = Path("outputs/tables/holdout_metrics.csv")
+        metrics_file = Path(f"outputs/tables/holdout_metrics_{holdout}.csv")
         if metrics_file.exists():
             df = pd.read_csv(metrics_file)
             pearson = df['pearson'].iloc[0]
@@ -99,22 +111,23 @@ def main():
             logger.error(f"Metrics file not found for fold {fold + 1}. Validation step may have failed.")
             sys.exit(1)
 
-    logger.info(f"{'='*60}")
-    logger.info("FINAL CROSS-VALIDATION RESULTS")
-    logger.info(f"{'='*60}")
+    if not single_holdout:
+        logger.info(f"{'='*60}")
+        logger.info("FINAL CROSS-VALIDATION RESULTS")
+        logger.info(f"{'='*60}")
 
-    res_df = pd.DataFrame(results)
-    print("\n" + res_df.to_string(index=False) + "\n")
+        res_df = pd.DataFrame(results)
+        print("\n" + res_df.to_string(index=False) + "\n")
 
-    mean_pearson = res_df['Pearson'].mean()
-    pearson_min = res_df['Pearson'].min()
-    pearson_max = res_df['Pearson'].max()
+        mean_pearson = res_df['Pearson'].mean()
+        pearson_min = res_df['Pearson'].min()
+        pearson_max = res_df['Pearson'].max()
 
-    logger.info(f"Mean Pearson Correlation: {mean_pearson:.3f} (Range: {pearson_min:.3f} - {pearson_max:.3f})")
+        logger.info(f"Mean Pearson Correlation: {mean_pearson:.3f} (Range: {pearson_min:.3f} - {pearson_max:.3f})")
 
-    Path("outputs/tables").mkdir(parents=True, exist_ok=True)
-    res_df.to_csv("outputs/tables/kfold_results.csv", index=False)
-    logger.info("Results saved to outputs/tables/kfold_results.csv")
+        Path("outputs/tables").mkdir(parents=True, exist_ok=True)
+        res_df.to_csv("outputs/tables/kfold_results.csv", index=False)
+        logger.info("Results saved to outputs/tables/kfold_results.csv")
 
 if __name__ == "__main__":
     main()

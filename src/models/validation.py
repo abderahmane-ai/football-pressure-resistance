@@ -50,7 +50,7 @@ def run_cross_validation() -> None:
     trace_path: Path = MODEL_TRACES_DIR / f"pooled_trace_{holdout}.nc"
     mapping_path: Path = MODEL_TRACES_DIR / f"pooled_mappings_{holdout}.pkl"
     scaler_path: Path = MODEL_TRACES_DIR / f"pooled_scaler_{holdout}.pkl"
-    leaderboard_path: Path = TABLES_DIR / "prs_leaderboard.csv"
+    leaderboard_path: Path = TABLES_DIR / f"prs_leaderboard_{holdout}.csv"
     _require_paths(holdout_path, trace_path, mapping_path, scaler_path, leaderboard_path)
 
     holdout_df: pd.DataFrame = pd.read_parquet(holdout_path)
@@ -162,7 +162,7 @@ def run_cross_validation() -> None:
         )
 
     TABLES_DIR.mkdir(parents=True, exist_ok=True)
-    merged.to_csv(TABLES_DIR / "holdout_correlation_data.csv", index=False)
+    merged.to_csv(TABLES_DIR / f"holdout_correlation_data_{holdout}.csv", index=False)
 
     metrics_df = pd.DataFrame([{
         "n_players": len(merged),
@@ -170,7 +170,7 @@ def run_cross_validation() -> None:
         "pearson_p": p_p,
         "auc": auc,
     }])
-    metrics_df.to_csv(TABLES_DIR / "holdout_metrics.csv", index=False)
+    metrics_df.to_csv(TABLES_DIR / f"holdout_metrics_{holdout}.csv", index=False)
 
 
 if __name__ == "__main__":

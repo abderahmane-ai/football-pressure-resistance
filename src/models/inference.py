@@ -218,7 +218,7 @@ def run_posterior_analysis() -> None:
     lb_df = pd.DataFrame(leaderboard).sort_values(by="mean_PRS", ascending=False)
 
     TABLES_DIR.mkdir(parents=True, exist_ok=True)
-    out_path: Path = TABLES_DIR / "prs_leaderboard.csv"
+    out_path: Path = TABLES_DIR / f"prs_leaderboard_{holdout}.csv"
     lb_df.to_csv(out_path, index=False)
     logger.info("Saved leaderboard with %d players (n>=%d) to %s", len(lb_df), MIN_EVENTS_THRESHOLD, out_path)
 

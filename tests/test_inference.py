@@ -98,7 +98,7 @@ def test_run_posterior_analysis_writes_sorted_leaderboard(tmp_path, monkeypatch)
 
     inference.run_posterior_analysis()
 
-    leaderboard = pd.read_csv(tables_dir / "prs_leaderboard.csv")
+    leaderboard = pd.read_csv(tables_dir / f"prs_leaderboard_{CROSS_VALIDATION_HOLDOUT}.csv")
     assert leaderboard["player_id"].tolist() == ["p1", "p2"]
     assert leaderboard.loc[0, "mean_Ball_Security_Score"] == pytest.approx(1.0)
     assert leaderboard.loc[0, "mean_PRS"] == pytest.approx(1.3)
