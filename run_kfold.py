@@ -57,7 +57,15 @@ def main():
 
         env = os.environ.copy()
         env["PRS_HOLDOUT"] = holdout
-        env["FORCE_RETRAIN"] = "1"
+        
+        # Check if trace already exists on the persistent volume to avoid rerunning MCMC (55 min/fold)
+        trace_file = Path("outputs/model_traces") / f"pooled_trace_{holdout}.nc"
+        if trace_file.exists():
+            logger.info(f"Trace for {holdout} already exists at {trace_file}. Skipping MCMC sampling for this fold.")
+            env["FORCE_RETRAIN"] = "0"
+        else:
+            env["FORCE_RETRAIN"] = "1"
+
 
         steps = [
             [python_cmd, "-m", "src.data.builder"],
