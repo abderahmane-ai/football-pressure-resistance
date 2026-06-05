@@ -10,8 +10,7 @@ from statsbombpy import sb
 from tqdm import tqdm
 
 from config import COMPETITIONS, RAW_DATA_DIR
-from src.data.validation import (validate_statsbomb_events,
-                                 validate_statsbomb_frames)
+from src.data.validation import validate_statsbomb_events, validate_statsbomb_frames
 
 warnings.filterwarnings("ignore", message="credentials were not supplied.*")
 

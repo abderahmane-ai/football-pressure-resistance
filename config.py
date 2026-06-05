@@ -24,10 +24,10 @@ CROSS_VALIDATION_HOLDOUT = os.environ.get("PRS_HOLDOUT", "Euro_2020")
 # Model Settings
 MODEL_SETTINGS = {
     "draws": 2000,
-    "tune": 2000,
+    "tune": 1500,
     "chains": 4,
     "random_seed": 42,
-    "target_accept": 0.95,
+    "target_accept": 0.9,
     "nuts_sampler": "numpyro",
 }
 

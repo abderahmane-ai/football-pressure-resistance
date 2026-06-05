@@ -3,9 +3,12 @@ import pandas as pd
 import pytest
 
 from config import MODEL_FEATURE_COLUMNS
-from src.data.validation import (DataValidationError, validate_model_dataset,
-                                 validate_statsbomb_events,
-                                 validate_statsbomb_frames)
+from src.data.validation import (
+    DataValidationError,
+    validate_model_dataset,
+    validate_statsbomb_events,
+    validate_statsbomb_frames,
+)
 
 
 def valid_events_df():

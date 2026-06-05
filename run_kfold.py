@@ -47,32 +47,33 @@ def main():
     check_optimization()
     python_cmd = get_python_cmd()
     logger.info(f"Using Python executable: {python_cmd}")
-    
+
     results = []
-    
+
     for fold, holdout in enumerate(COMPS):
         logger.info(f"{'='*60}")
         logger.info(f"FOLD {fold + 1}/4: Holdout = {holdout}")
         logger.info(f"{'='*60}")
-        
+
         env = os.environ.copy()
         env["PRS_HOLDOUT"] = holdout
-        
+        env["FORCE_RETRAIN"] = "1"
+
         steps = [
             [python_cmd, "-m", "src.data.builder"],
             [python_cmd, "-m", "src.models.bayesian"],
             [python_cmd, "-m", "src.models.inference"],
             [python_cmd, "-m", "src.models.validation"]
         ]
-        
+
         start_time = time.time()
         for step in steps:
             logger.info(f"--> Executing: {' '.join(step)}")
             run_step(step, env)
-            
+
         fold_time = time.time() - start_time
         logger.info(f"Fold {fold + 1} completed in {fold_time / 60:.1f} minutes.")
-        
+
         metrics_file = Path("outputs/tables/holdout_metrics.csv")
         if metrics_file.exists():
             df = pd.read_csv(metrics_file)
@@ -89,20 +90,20 @@ def main():
         else:
             logger.error(f"Metrics file not found for fold {fold + 1}. Validation step may have failed.")
             sys.exit(1)
-            
+
     logger.info(f"{'='*60}")
     logger.info("FINAL CROSS-VALIDATION RESULTS")
     logger.info(f"{'='*60}")
-    
+
     res_df = pd.DataFrame(results)
     print("\n" + res_df.to_string(index=False) + "\n")
-    
+
     mean_pearson = res_df['Pearson'].mean()
     pearson_min = res_df['Pearson'].min()
     pearson_max = res_df['Pearson'].max()
-    
+
     logger.info(f"Mean Pearson Correlation: {mean_pearson:.3f} (Range: {pearson_min:.3f} - {pearson_max:.3f})")
-    
+
     Path("outputs/tables").mkdir(parents=True, exist_ok=True)
     res_df.to_csv("outputs/tables/kfold_results.csv", index=False)
     logger.info("Results saved to outputs/tables/kfold_results.csv")

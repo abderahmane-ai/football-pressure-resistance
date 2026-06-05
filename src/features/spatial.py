@@ -8,8 +8,7 @@ import pandas as pd
 
 from config import SPATIAL_CONFIG
 
-from .geometry import (angular_span, lane_unblocked, pitch_control_value,
-                       voronoi_area, xt_value)
+from .geometry import angular_span, lane_unblocked, pitch_control_value, voronoi_area, xt_value
 
 
 def extract_spatial_features_from_frame(

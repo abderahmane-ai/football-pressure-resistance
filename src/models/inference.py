@@ -11,8 +11,14 @@ import numpy as np
 import pandas as pd
 from scipy.special import expit
 
-from config import (MIN_EVENTS_THRESHOLD, MODEL_TRACES_DIR, PROCESSED_DATA_DIR,
-                    SPATIAL_CONFIG, TABLES_DIR)
+from config import (
+    CROSS_VALIDATION_HOLDOUT,
+    MIN_EVENTS_THRESHOLD,
+    MODEL_TRACES_DIR,
+    PROCESSED_DATA_DIR,
+    SPATIAL_CONFIG,
+    TABLES_DIR,
+)
 from src.data.validation import validate_model_dataset
 
 logger = logging.getLogger(__name__)
@@ -34,10 +40,11 @@ def run_posterior_analysis() -> None:
     Generate player leaderboards with Ball Security and Value Retention scores.
     Uses expit for numeric stability and appropriately handles the Hurdle model outputs.
     """
-    trace_path: Path = MODEL_TRACES_DIR / "pooled_trace.nc"
-    mapping_path: Path = MODEL_TRACES_DIR / "pooled_mappings.pkl"
-    scaler_path: Path = MODEL_TRACES_DIR / "pooled_scaler.pkl"
-    dataset_path: Path = PROCESSED_DATA_DIR / "all_pressure_dataset.parquet"
+    holdout = CROSS_VALIDATION_HOLDOUT
+    trace_path: Path = MODEL_TRACES_DIR / f"pooled_trace_{holdout}.nc"
+    mapping_path: Path = MODEL_TRACES_DIR / f"pooled_mappings_{holdout}.pkl"
+    scaler_path: Path = MODEL_TRACES_DIR / f"pooled_scaler_{holdout}.pkl"
+    dataset_path: Path = PROCESSED_DATA_DIR / f"all_pressure_dataset_{holdout}.parquet"
     _require_paths(trace_path, mapping_path, scaler_path, dataset_path)
 
     trace: az.InferenceData = az.from_netcdf(trace_path)

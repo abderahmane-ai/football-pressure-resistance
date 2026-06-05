@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import pickle
 import warnings
 from pathlib import Path
@@ -13,13 +14,49 @@ import pandas as pd
 import pymc as pm
 from sklearn.preprocessing import StandardScaler
 
-from config import (MODEL_FEATURE_COLUMNS, MODEL_SETTINGS, MODEL_TRACES_DIR,
-                    PROCESSED_DATA_DIR)
+from config import (
+    CROSS_VALIDATION_HOLDOUT,
+    MODEL_FEATURE_COLUMNS,
+    MODEL_SETTINGS,
+    MODEL_TRACES_DIR,
+    PROCESSED_DATA_DIR,
+)
 from src.data.validation import DataValidationError, validate_model_dataset
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
 logger = logging.getLogger(__name__)
+
+
+# ── JAX / device verification ────────────────────────────────────────────────
+
+def _verify_jax_gpu() -> str:
+    """Hard-fail if JAX cannot see the GPU.
+
+    The fallback path (PyMC default NUTS, sequential chains) is tens of times
+    slower on this model and is the single most common cause of multi-hour
+    training runs. We refuse to enter it silently.
+    """
+    try:
+        import jax
+    except ImportError as exc:
+        raise RuntimeError(
+            "JAX is not installed. NumPyro NUTS requires JAX. "
+            "Install with: pip install -r requirements-accelerated.txt"
+        ) from exc
+
+    devices = jax.devices()
+    platform = devices[0].platform if devices else "unknown"
+    if platform != "gpu" and platform != "cuda":
+        raise RuntimeError(
+            f"JAX is running on platform '{platform}', not GPU. "
+            f"Devices: {devices}. "
+            "The NumPyro fallback (CPU) is disabled to prevent multi-hour runs. "
+            "Set the env var JAX_PLATFORMS=cuda and ensure the A100 driver is "
+            "visible inside the container."
+        )
+    logger.info("JAX is using GPU: %s", devices[0])
+    return platform
 
 
 # ── Intermediate caching ─────────────────────────────────────────────────────
@@ -119,13 +156,24 @@ def fit_pooled_model() -> az.InferenceData | None:
     """
     Fit a hurdle model separating Ball Security from Value Retention.
     """
-    import os
-    trace_path: Path = MODEL_TRACES_DIR / "pooled_trace.nc"
+
+    # ── Holdout-aware artifact paths ─────────────────────────────────────
+    # The 4-fold CV retrains once per holdout. The trace, scaler, and
+    # mappings must be keyed by holdout name, otherwise fold 1's model is
+    # silently reused for folds 2-4 (data leakage in the CV metrics).
+    holdout = CROSS_VALIDATION_HOLDOUT
+    trace_path: Path = MODEL_TRACES_DIR / f"pooled_trace_{holdout}.nc"
+    scaler_path: Path = MODEL_TRACES_DIR / f"pooled_scaler_{holdout}.pkl"
+    mappings_path: Path = MODEL_TRACES_DIR / f"pooled_mappings_{holdout}.pkl"
+
     if trace_path.exists() and not os.environ.get("FORCE_RETRAIN", "") == "1":
-        logger.info("Found existing trace at %s. Skipping MCMC (set FORCE_RETRAIN=1 to override).", trace_path)
+        logger.info(
+            "Found existing trace at %s. Skipping MCMC (set FORCE_RETRAIN=1 to override).",
+            trace_path,
+        )
         return az.from_netcdf(str(trace_path))
 
-    dataset_path: Path = PROCESSED_DATA_DIR / "all_pressure_dataset.parquet"
+    dataset_path: Path = PROCESSED_DATA_DIR / f"all_pressure_dataset_{holdout}.parquet"
     if not dataset_path.exists():
         logger.error(
             "Dataset not found at %s. Run src.data.builder first to generate "
@@ -150,7 +198,6 @@ def fit_pooled_model() -> az.InferenceData | None:
     y_value_scaled = np.clip(y_value_scaled, epsilon, 1 - epsilon)
 
     # ── Scaler (with intermediate caching) ────────────────────────────────
-    scaler_path: Path = MODEL_TRACES_DIR / "pooled_scaler.pkl"
     MODEL_TRACES_DIR.mkdir(parents=True, exist_ok=True)
 
     cached = _load_cached_scaler(scaler_path)
@@ -194,7 +241,7 @@ def fit_pooled_model() -> az.InferenceData | None:
     pos_lookup: dict[Any, str] = df.drop_duplicates("player_id").set_index("player_id")["position_group"].to_dict()
 
     _save_mappings(
-        MODEL_TRACES_DIR / "pooled_mappings.pkl",
+        mappings_path,
         player_mapping, comp_mapping, opp_team_mapping, pos_mapping,
         name_lookup, pos_lookup,
     )
@@ -210,11 +257,17 @@ def fit_pooled_model() -> az.InferenceData | None:
 
     with pm.Model():  # type: ignore[attr-defined]
         # --- BALL SECURITY MODEL (Logistic) ---
-        X_data_succ = pm.Data("X_succ", X_scaled)
-        pid_succ = pm.Data("pid_succ", player_idx)
-        cid_succ = pm.Data("cid_succ", comp_idx)
-        oid_succ = pm.Data("oid_succ", opp_idx)
-        posid_succ = pm.Data("posid_succ", pos_idx)
+        # Data is passed directly as numpy arrays (becomes TensorConstant in the
+        # graph) instead of via pm.Data (TensorSharedVariable). This is faster
+        # under the NumPyro/JAX backend because TensorConstants are baked into
+        # the JIT-compiled function, while SharedVariables require XLA to
+        # read them at every step. The data is observation-only and never
+        # mutated during sampling, so there is no functional difference.
+        X_data_succ = X_scaled
+        pid_succ = player_idx
+        cid_succ = comp_idx
+        oid_succ = opp_idx
+        posid_succ = pos_idx
 
         alpha_succ = pm.Normal("alpha_succ", 0, 1.5)
         beta_succ = pm.Normal("beta_succ", 0, 1.0, shape=n_features)
@@ -243,11 +296,11 @@ def fit_pooled_model() -> az.InferenceData | None:
         pm.Bernoulli("y_succ_obs", p=p, observed=y_success)
 
         # --- VALUE RETENTION MODEL (Beta) ---
-        X_data_val = pm.Data("X_val", X_val)
-        pid_val = pm.Data("pid_val", player_idx_val)
-        cid_val = pm.Data("cid_val", comp_idx_val)
-        oid_val = pm.Data("oid_val", opp_idx_val)
-        posid_val = pm.Data("posid_val", pos_idx_val)
+        X_data_val = X_val
+        pid_val = player_idx_val
+        cid_val = comp_idx_val
+        oid_val = opp_idx_val
+        posid_val = pos_idx_val
 
         alpha_val = pm.Normal("alpha_val", 0, 1.5)
         beta_val = pm.Normal("beta_val", 0, 1.0, shape=n_features)
@@ -280,41 +333,33 @@ def fit_pooled_model() -> az.InferenceData | None:
 
         pm.Beta("y_val_obs", alpha=alpha_beta, beta=beta_beta, observed=y_val_scaled)
 
-        logger.info("Starting MCMC sampling...")
-        try:
-            # chain_method='vectorized' uses vmap to run all chains simultaneously on one GPU.
-            # 'parallel' (pmap) requires one device per chain and silently falls back to
-            # sequential with a single GPU, giving a 4× slowdown.
-            trace = pm.sample(
-                draws=MODEL_SETTINGS["draws"],
-                tune=MODEL_SETTINGS["tune"],
-                chains=MODEL_SETTINGS["chains"],
-                target_accept=MODEL_SETTINGS["target_accept"],
-                random_seed=MODEL_SETTINGS["random_seed"],
-                nuts_sampler=MODEL_SETTINGS["nuts_sampler"],
-                chain_method="vectorized",
-                return_inferencedata=True,
-                progressbar=True,
-            )
-        except Exception as e:
-            logger.warning(
-                "numpyro vectorized sampling failed: %s. "
-                "Falling back to default PyMC NUTS sampler (sequential chains to avoid JAX/fork deadlock).",
-                e,
-            )
-            # chain_method='sequential' avoids os.fork() deadlocking when JAX has initialised.
-            trace = pm.sample(
-                draws=MODEL_SETTINGS["draws"],
-                tune=MODEL_SETTINGS["tune"],
-                chains=MODEL_SETTINGS["chains"],
-                target_accept=MODEL_SETTINGS["target_accept"],
-                random_seed=MODEL_SETTINGS["random_seed"],
-                chain_method="sequential",
-                return_inferencedata=True,
-                progressbar=True,
-            )
+        logger.info("Starting MCMC sampling on holdout=%s ...", holdout)
+        logger.info(
+            "Settings: draws=%d tune=%d chains=%d target_accept=%.2f sampler=%s",
+            MODEL_SETTINGS["draws"], MODEL_SETTINGS["tune"],
+            MODEL_SETTINGS["chains"], MODEL_SETTINGS["target_accept"],
+            MODEL_SETTINGS["nuts_sampler"],
+        )
 
-    trace_path: Path = MODEL_TRACES_DIR / "pooled_trace.nc"
+        # Refuse to silently fall back to the slow CPU NUTS path.
+        _verify_jax_gpu()
+
+        # chain_method='vectorized' uses vmap to run all chains simultaneously
+        # on a single GPU device — the only correct choice for 1×A100.
+        # 'parallel' (pmap) requires one device per chain and silently falls
+        # back to sequential with a single GPU, giving a 4× slowdown.
+        trace = pm.sample(
+            draws=MODEL_SETTINGS["draws"],
+            tune=MODEL_SETTINGS["tune"],
+            chains=MODEL_SETTINGS["chains"],
+            target_accept=MODEL_SETTINGS["target_accept"],
+            random_seed=MODEL_SETTINGS["random_seed"],
+            nuts_sampler=MODEL_SETTINGS["nuts_sampler"],
+            chain_method="vectorized",
+            return_inferencedata=True,
+            progressbar=True,
+        )
+
     trace.to_netcdf(str(trace_path))
     logger.info("Saved trace to %s", trace_path)
 

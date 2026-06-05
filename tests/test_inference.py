@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 from sklearn.preprocessing import StandardScaler
 
+from config import CROSS_VALIDATION_HOLDOUT
 from src.models import inference
 
 FEATURES = ["dist_nearest_opp", "angle_nearest_opp", "coverage_arc"]
@@ -43,7 +44,7 @@ def _build_artifacts(tmp_path):
     tables_dir.mkdir()
     processed_dir.mkdir()
 
-    _build_trace(traces_dir / "pooled_trace.nc")
+    _build_trace(traces_dir / f"pooled_trace_{CROSS_VALIDATION_HOLDOUT}.nc")
 
     mappings = {
         "player": {0: "p1", 1: "p2"},
@@ -51,11 +52,11 @@ def _build_artifacts(tmp_path):
         "name_lookup": {"p1": "High Player", "p2": "Low Player"},
         "position_lookup": {"p1": "Midfielder", "p2": "Midfielder"},
     }
-    with open(traces_dir / "pooled_mappings.pkl", "wb") as f:
+    with open(traces_dir / f"pooled_mappings_{CROSS_VALIDATION_HOLDOUT}.pkl", "wb") as f:
         pickle.dump(mappings, f)
 
     scaler = StandardScaler().fit(np.zeros((2, len(FEATURES))))
-    with open(traces_dir / "pooled_scaler.pkl", "wb") as f:
+    with open(traces_dir / f"pooled_scaler_{CROSS_VALIDATION_HOLDOUT}.pkl", "wb") as f:
         pickle.dump({"scaler": scaler, "features": FEATURES, "max_value": 0.15}, f)
 
     rows = []
@@ -77,7 +78,9 @@ def _build_artifacts(tmp_path):
             "coverage_arc": 0.5,
         }
         rows.append(row)
-    pd.DataFrame(rows).to_parquet(processed_dir / "all_pressure_dataset.parquet")
+    pd.DataFrame(rows).to_parquet(
+        processed_dir / f"all_pressure_dataset_{CROSS_VALIDATION_HOLDOUT}.parquet"
+    )
     return traces_dir, tables_dir, processed_dir
 
 

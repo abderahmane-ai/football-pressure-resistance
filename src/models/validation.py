@@ -13,8 +13,14 @@ from scipy.special import expit
 from scipy.stats import pearsonr, spearmanr
 from sklearn.metrics import roc_auc_score
 
-from config import (MIN_EVENTS_THRESHOLD, MODEL_TRACES_DIR, PROCESSED_DATA_DIR,
-                    SPATIAL_CONFIG, TABLES_DIR)
+from config import (
+    CROSS_VALIDATION_HOLDOUT,
+    MIN_EVENTS_THRESHOLD,
+    MODEL_TRACES_DIR,
+    PROCESSED_DATA_DIR,
+    SPATIAL_CONFIG,
+    TABLES_DIR,
+)
 from src.data.validation import validate_model_dataset
 
 logger = logging.getLogger(__name__)
@@ -39,10 +45,11 @@ def run_cross_validation() -> None:
     """
     logger.info("=== CROSS-VALIDATION: VALUE-RESIDUAL CORRELATION ===")
 
-    holdout_path: Path = PROCESSED_DATA_DIR / "holdout_pressure_dataset.parquet"
-    trace_path: Path = MODEL_TRACES_DIR / "pooled_trace.nc"
-    mapping_path: Path = MODEL_TRACES_DIR / "pooled_mappings.pkl"
-    scaler_path: Path = MODEL_TRACES_DIR / "pooled_scaler.pkl"
+    holdout = CROSS_VALIDATION_HOLDOUT
+    holdout_path: Path = PROCESSED_DATA_DIR / f"holdout_pressure_dataset_{holdout}.parquet"
+    trace_path: Path = MODEL_TRACES_DIR / f"pooled_trace_{holdout}.nc"
+    mapping_path: Path = MODEL_TRACES_DIR / f"pooled_mappings_{holdout}.pkl"
+    scaler_path: Path = MODEL_TRACES_DIR / f"pooled_scaler_{holdout}.pkl"
     leaderboard_path: Path = TABLES_DIR / "prs_leaderboard.csv"
     _require_paths(holdout_path, trace_path, mapping_path, scaler_path, leaderboard_path)
 

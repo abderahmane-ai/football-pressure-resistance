@@ -15,14 +15,21 @@ import pyarrow.parquet as pq
 from statsbombpy import sb
 from tqdm import tqdm
 
-from config import (COMPETITIONS, CROSS_VALIDATION_HOLDOUT,
-                    MODEL_FEATURE_COLUMNS, PROCESSED_DATA_DIR, SPATIAL_CONFIG)
+from config import (
+    COMPETITIONS,
+    CROSS_VALIDATION_HOLDOUT,
+    MODEL_FEATURE_COLUMNS,
+    PROCESSED_DATA_DIR,
+    SPATIAL_CONFIG,
+)
 from src.data.labels import define_success
 from src.data.loader import load_all_competitions
 from src.data.pairing import pair_pressure_with_ball_carrier
-from src.data.validation import (validate_model_dataset,
-                                 validate_statsbomb_events,
-                                 validate_statsbomb_frames)
+from src.data.validation import (
+    validate_model_dataset,
+    validate_statsbomb_events,
+    validate_statsbomb_frames,
+)
 from src.features.geometry import xt_value
 from src.features.spatial import extract_spatial_features_from_frame
 
@@ -338,6 +345,19 @@ def build_all_datasets(include_holdout: bool = False) -> pd.DataFrame | None:
     """Build the complete processed dataset for all competitions (parallelised per match)."""
     logger.info("Building dataset for all competitions...")
 
+    # Skip rebuild if a per-holdout cached parquet already exists. Raw data
+    # is content-addressed by the upstream StatsBomb API; if the raw cache
+    # is unchanged, the processed dataset is byte-equivalent and rebuilding
+    # it costs 15-30 min for no gain.
+    out_file = PROCESSED_DATA_DIR / f"all_pressure_dataset_{CROSS_VALIDATION_HOLDOUT}.parquet"
+    if out_file.exists() and not os.environ.get("FORCE_REBUILD_DATA", "") == "1":
+        logger.info(
+            "Found cached training dataset at %s. Skipping rebuild "
+            "(set FORCE_REBUILD_DATA=1 to override).",
+            out_file,
+        )
+        return pd.read_parquet(out_file)
+
     comp_names = list(COMPETITIONS.keys())
     if not include_holdout and CROSS_VALIDATION_HOLDOUT in comp_names:
         comp_names.remove(CROSS_VALIDATION_HOLDOUT)
@@ -394,7 +414,8 @@ def build_all_datasets(include_holdout: bool = False) -> pd.DataFrame | None:
         dataset_df = pd.DataFrame(all_processed_data)
         validate_model_dataset(dataset_df, MODEL_FEATURE_COLUMNS, context="training pressure dataset")
         PROCESSED_DATA_DIR.mkdir(parents=True, exist_ok=True)
-        out_file = PROCESSED_DATA_DIR / "all_pressure_dataset.parquet"
+        # Key the training dataset by holdout so the 4-fold CV cache survives
+        # across folds without overwriting an in-use file.
         source_hash = _dataframe_hash(dataset_df)
         _save_parquet_with_metadata(
             dataset_df,
@@ -414,6 +435,17 @@ def build_all_datasets(include_holdout: bool = False) -> pd.DataFrame | None:
 def build_holdout_dataset() -> None:
     """Build dataset for holdout competition only (parallelised per match)."""
     logger.info("Building holdout dataset: %s", CROSS_VALIDATION_HOLDOUT)
+
+    PROCESSED_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    out_file = PROCESSED_DATA_DIR / f"holdout_pressure_dataset_{CROSS_VALIDATION_HOLDOUT}.parquet"
+    if out_file.exists() and not os.environ.get("FORCE_REBUILD_DATA", "") == "1":
+        logger.info(
+            "Found cached holdout dataset at %s. Skipping rebuild "
+            "(set FORCE_REBUILD_DATA=1 to override).",
+            out_file,
+        )
+        return
+
     all_comp_data = load_all_competitions([CROSS_VALIDATION_HOLDOUT])
     all_processed_data: list[dict[str, Any]] = []
 
@@ -456,8 +488,6 @@ def build_holdout_dataset() -> None:
     if all_processed_data:
         dataset_df = pd.DataFrame(all_processed_data)
         validate_model_dataset(dataset_df, MODEL_FEATURE_COLUMNS, context="holdout pressure dataset")
-        PROCESSED_DATA_DIR.mkdir(parents=True, exist_ok=True)
-        out_file = PROCESSED_DATA_DIR / "holdout_pressure_dataset.parquet"
         source_hash = _dataframe_hash(dataset_df)
         _save_parquet_with_metadata(
             dataset_df,
