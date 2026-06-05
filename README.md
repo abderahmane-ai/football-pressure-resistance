@@ -207,11 +207,11 @@ python -m src.models.validation
 
 | Path | Description |
 |------|-------------|
-| `outputs/tables/prs_leaderboard.csv` | Player Ball Security, Value Retention, PRS, HDI, best scenario |
+| `outputs/tables/prs_leaderboard_{holdout}.csv` | Player Ball Security, Value Retention, PRS, HDI, best scenario (main aggregated copy at `prs_leaderboard.csv`) |
 | `outputs/tables/feature_importance.csv` | Standardized β coefficients with 90% HDI for both sub-models |
 | `outputs/tables/variance_decomposition.csv` | Variance split: Player Skill / Opp Quality / Competition / Spatial Features |
-| `outputs/tables/holdout_correlation_data.csv` | Per-player training PRS vs holdout residuals |
-| `outputs/tables/holdout_metrics.csv` | Pearson r, p-value, Spearman r (logged only), AUC, n_players |
+| `outputs/tables/holdout_correlation_data_{holdout}.csv` | Per-player training PRS vs holdout residuals |
+| `outputs/tables/holdout_metrics_{holdout}.csv` | Pearson r, p-value, Spearman r (logged only), AUC, n_players |
 | `outputs/tables/kfold_results.csv` | Aggregate 4-fold validation results |
 | `outputs/tables/marginal_dist.csv` | *(Optional)* Population marginal expected value by opponent distance |
 | `outputs/tables/marginal_arc.csv` | *(Optional)* Population marginal expected value by opponent coverage arc |
@@ -221,4 +221,4 @@ python -m src.models.validation
 | `outputs/figures/3_marginal_dist.png` | *(Optional)* Population marginal effect — nearest opponent distance |
 | `outputs/figures/3_marginal_arc.png` | *(Optional)* Population marginal effect — coverage arc |
 | `outputs/figures/7_stability_scatter.png` | Training PRS vs holdout residuals |
-| `outputs/model_traces/pooled_trace.nc` | Full MCMC posterior (NetCDF) |
+| `outputs/model_traces/pooled_trace_{holdout}.nc` | Full MCMC posterior (NetCDF) |
