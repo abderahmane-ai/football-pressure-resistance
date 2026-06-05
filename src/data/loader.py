@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import time
 import warnings
 from pathlib import Path
 
@@ -16,15 +17,43 @@ warnings.filterwarnings("ignore", message="credentials were not supplied.*")
 
 logger = logging.getLogger(__name__)
 
+# Maximum number of retries for StatsBomb API calls
+_MAX_RETRIES: int = 3
+_RETRY_BACKOFF: float = 2.0  # seconds; doubled on each retry
+
+
+def _retry_api_call(fn, *args, description: str = "API call", **kwargs):  # type: ignore[no-untyped-def]
+    """Retry a StatsBomb API call with exponential backoff."""
+    delay = _RETRY_BACKOFF
+    for attempt in range(1, _MAX_RETRIES + 1):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as e:
+            if attempt == _MAX_RETRIES:
+                raise
+            logger.warning(
+                "%s failed (attempt %d/%d): %s — retrying in %.0fs",
+                description, attempt, _MAX_RETRIES, e, delay,
+            )
+            time.sleep(delay)
+            delay *= 2
+    return None  # unreachable, but keeps mypy happy
+
 
 def load_competition_events(comp_id: int, season_id: int) -> pd.DataFrame:
     """Load all events for a given competition and season from the StatsBomb API."""
-    matches = sb.matches(competition_id=comp_id, season_id=season_id)
+    matches = _retry_api_call(
+        sb.matches, competition_id=comp_id, season_id=season_id,
+        description=f"matches({comp_id}/{season_id})",
+    )
     all_events: list[pd.DataFrame] = []
 
     for match_id in matches["match_id"]:
         try:
-            events = sb.events(match_id=match_id)
+            events = _retry_api_call(
+                sb.events, match_id=match_id,
+                description=f"events(match {match_id})",
+            )
             events["match_id"] = match_id
             # pyrefly: ignore [bad-argument-type]
             all_events.append(events)
@@ -44,7 +73,10 @@ def load_competition_events(comp_id: int, season_id: int) -> pd.DataFrame:
 def load_match_frames(match_id: int) -> pd.DataFrame:
     """Load 360 frames for a specific match from the StatsBomb API."""
     try:
-        frames_data = sb.frames(match_id=match_id, fmt="dict")
+        frames_data = _retry_api_call(
+            sb.frames, match_id=match_id, fmt="dict",
+            description=f"frames(match {match_id})",
+        )
         if isinstance(frames_data, dict):
             frames_data = list(frames_data.values())
         frames_df = pd.DataFrame(frames_data)
@@ -83,19 +115,31 @@ def download_all(competition_name: str) -> None:
     else:
         logger.info("Events for %s already cached.", competition_name)
 
-    # Download frames
-    matches = sb.matches(competition_id=comp_id, season_id=season_id)
+    # Fetch match list once for frames download (avoid duplicate API call)
+    matches = _retry_api_call(
+        sb.matches, competition_id=comp_id, season_id=season_id,
+        description=f"matches({comp_id}/{season_id})",
+    )
     frames_dir = out_dir / "frames"
     frames_dir.mkdir(exist_ok=True)
 
     for match_id in tqdm(matches["match_id"], desc=f"Downloading frames ({competition_name})"):
-        frame_path = frames_dir / f"{match_id}.pkl"
-        if not frame_path.exists():
+        # Support both parquet (preferred) and legacy pickle
+        frame_path_parquet = frames_dir / f"{match_id}.parquet"
+        frame_path_legacy = frames_dir / f"{match_id}.pkl"
+        if not frame_path_parquet.exists() and not frame_path_legacy.exists():
             frames_df = load_match_frames(match_id)
             if isinstance(frames_df, pd.DataFrame) and not frames_df.empty:
-                frames_df.to_pickle(frame_path)
+                frames_df.to_parquet(frame_path_parquet)
         else:
             logger.debug("Frames for match %d already cached.", match_id)
+
+
+def _read_frame_file(path: Path) -> pd.DataFrame:
+    """Read a frame file, supporting both parquet and legacy pickle."""
+    if path.suffix == ".parquet":
+        return pd.read_parquet(path)
+    return pd.read_pickle(path)
 
 
 def load_all_competitions(
@@ -124,15 +168,20 @@ def load_all_competitions(
             events_df = pd.read_parquet(events_path)
         validate_statsbomb_events(events_df, context=f"{comp_name} events")
 
-        # Load frames
+        # Load frames (supports both parquet and legacy pickle)
         frames_dir = RAW_DATA_DIR / comp_name / "frames"
         frames_dict: dict[int, pd.DataFrame] = {}
 
         if frames_dir.exists():
-            for frame_file in frames_dir.glob("*.pkl"):
+            for frame_file in sorted(frames_dir.glob("*")):
+                if frame_file.suffix not in (".parquet", ".pkl"):
+                    continue
                 match_id = int(frame_file.stem)
+                # Skip legacy pickle if parquet exists for same match
+                if frame_file.suffix == ".pkl" and (frames_dir / f"{match_id}.parquet").exists():
+                    continue
                 try:
-                    frames_df = pd.read_pickle(frame_file)
+                    frames_df = _read_frame_file(frame_file)
                     if not frames_df.empty:
                         validate_statsbomb_frames(frames_df, context=f"{comp_name} match {match_id} frames")
                         frames_dict[match_id] = frames_df

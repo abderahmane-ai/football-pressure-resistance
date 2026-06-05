@@ -168,3 +168,24 @@ Evaluating performance via in-sample loss functions (like AUC or RMSE on the tra
 4. **Correlation:** We average the residuals per player across their season in the holdout dataset ($\bar{r}_{player}$) and correlate this with their *training* PRS ($\theta_{player}$) derived from the entirely separate training dataset.
 
 A significant positive Pearson correlation is evidence that the two $\theta$ traits extracted by the model capture stable, persistent cognitive and technical traits. It supports the claim that composure under pressure is not merely random variance, but a measurable skill that can transfer across different tactical environments, leagues, and tournaments.
+
+---
+
+## 8. Limitations
+
+While the PRS framework represents a methodological advance over naive binary metrics, several assumptions and constraints should be acknowledged:
+
+### 8.1 Sample Size and Generalisability
+The model trains on 4 international tournaments from the StatsBomb Open Data catalogue (~600 matches, ~50 000 pressure events after filtering). This provides strong statistical power for estimating population-level feature effects, but the per-player random effect ($\theta_i$) for infrequently-observed players (< 30 events) has wide credible intervals. Furthermore, the model has only been validated on international competitions; club-level football may exhibit different pressure geometries, tactical pressing systems, and roster continuity effects. Extending the model to club data would require re-examining the competition random effect and the hierarchical variance priors.
+
+### 8.2 Composure as a Stable Trait
+The hierarchical model assumes that a player's latent composure ($\theta_i$) is a time-invariant trait — the same in minute 5 and minute 85, across a group-stage dead rubber and a semi-final. In reality, composure is likely form-dependent (injury, confidence) and context-dependent (home vs away, scoreline, tournament stage). The `game_state_diff` and `minutes_elapsed` features partially control for within-match variation, but they do not model time-varying player effects. A state-space extension (random walk on $\theta_i$ across matches) would address this at the cost of computational complexity.
+
+### 8.3 Expected Threat (xT) Grid Resolution
+The xT grid used to value actions is an $8 \times 12$ discrete grid (Karun Singh, 2019), giving each cell a coverage of $\approx 15 \times 7$ yards. This is sufficient for open-play possession sequences but introduces quantisation error when evaluating short-distance actions (carries of 3–5 yards, lateral passes). Actions that start and end within the same cell receive $\Delta xT = 0$, undervaluing subtle positional improvements. A higher-resolution model (e.g., $16 \times 24$ or a continuous xT surface fitted via gradient boosting) would improve granularity, at the cost of requiring more training data to populate the surface reliably.
+
+### 8.4 Angular Coverage Approximation
+The `coverage_arc` feature uses a body-width trigonometric projection to estimate how much of the carrier's angular field of view is blocked by opponents. For multi-opponent scenarios, the implementation assumes opponents are non-overlapping angular sources. When opponents are very close together (< 1 yard apart), their individual body-width arcs may overlap, leading to a slight overestimate of coverage. Additionally, the model does not account for opponent height, approach speed, or body orientation, all of which influence the perceived pressure in practice.
+
+### 8.5 Freeze-Frame Temporal Resolution
+StatsBomb 360 frames capture a single snapshot at the moment of the event. They do not encode player velocities, acceleration vectors, or body orientation. A player sprinting toward the carrier at 8 m/s from 4 yards away exerts substantially more pressure than a stationary player at the same distance, but both produce identical spatial features. Integrating tracking data (where available) to compute velocity-weighted features would substantially improve the model's ability to distinguish true pressure from spatial proximity.

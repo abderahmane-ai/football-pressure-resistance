@@ -90,9 +90,9 @@ def validate_statsbomb_events(events_df: pd.DataFrame, context: str = "events") 
         )
 
     if "location" in events_df.columns:
-        invalid = events_df["location"].dropna().map(_is_valid_location)
-        if not invalid.all():
-            n_bad = int((~invalid).sum())
+        valid_mask = events_df["location"].dropna().map(_is_valid_location)
+        if not valid_mask.all():
+            n_bad = int((~valid_mask).sum())
             raise DataValidationError(
                 f"{context}: {n_bad} event(s) with malformed locations "
                 "(expected [x, y] arrays with numeric values)."

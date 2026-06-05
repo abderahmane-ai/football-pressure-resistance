@@ -79,15 +79,14 @@ def run_cross_validation() -> None:
     beta_val: np.ndarray = post["beta_val"].values.reshape(-1, len(feature_names))
     gamma_pos_val: np.ndarray = post["gamma_pos_val"].values.reshape(-1, len(pos_mapping))
 
-    # Marginalise opp/comp by posterior group mean — consistent with leaderboard
-    delta_opp_succ: np.ndarray = post["delta_opp_succ"].values.reshape(-1, post["delta_opp_succ"].shape[-1])
-    zeta_comp_succ: np.ndarray = post["zeta_comp_succ"].values.reshape(-1, post["zeta_comp_succ"].shape[-1])
-    delta_opp_val: np.ndarray = post["delta_opp_val"].values.reshape(-1, post["delta_opp_val"].shape[-1])
-    zeta_comp_val: np.ndarray = post["zeta_comp_val"].values.reshape(-1, post["zeta_comp_val"].shape[-1])
-    mean_opp_succ: np.ndarray = delta_opp_succ.mean(axis=1)
-    mean_comp_succ: np.ndarray = zeta_comp_succ.mean(axis=1)
-    mean_opp_val: np.ndarray = delta_opp_val.mean(axis=1)
-    mean_comp_val: np.ndarray = zeta_comp_val.mean(axis=1)
+    # Marginalise opponent/competition effects using the prior mean (zero)
+    # for holdout predictions.  The non-centered parameterisation means the
+    # prior mean of each random effect is exactly zero, which is the
+    # principled choice for out-of-sample data where the specific opponent
+    # and competition are unseen during training.  (Previously, the
+    # training-set posterior group mean was used, which would bias holdout
+    # predictions if the training competitions were systematically
+    # stronger/weaker than the holdout.)
 
     X_holdout: np.ndarray = holdout_df[feature_names].values
     X_holdout_scaled: np.ndarray = scaler.transform(X_holdout)
@@ -101,7 +100,7 @@ def run_cross_validation() -> None:
         .values
     )
 
-    # Vectorised linear predictors
+    # Vectorised linear predictors (opponent/competition effects marginalised to zero)
     logit_succ_base: np.ndarray = alpha_succ[:, np.newaxis] + np.dot(beta_succ, X_holdout_scaled.T)
     logit_val_base: np.ndarray = alpha_val[:, np.newaxis] + np.dot(beta_val, X_holdout_scaled.T)
 
@@ -109,9 +108,7 @@ def run_cross_validation() -> None:
     logit_succ_base += gamma_pos_succ[:, holdout_pos_codes]
     logit_val_base += gamma_pos_val[:, holdout_pos_codes]
 
-    # Marginalised opp/comp effects
-    logit_succ_base += mean_opp_succ[:, np.newaxis] + mean_comp_succ[:, np.newaxis]
-    logit_val_base += mean_opp_val[:, np.newaxis] + mean_comp_val[:, np.newaxis]
+    # No opponent/competition adjustments — prior mean is zero for unseen groups
 
     p_succ: np.ndarray = expit(logit_succ_base)
     mu_val: np.ndarray = expit(logit_val_base) * max_value

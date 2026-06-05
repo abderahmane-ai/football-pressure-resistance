@@ -41,7 +41,13 @@ N_WORKERS: int = min(os.cpu_count() or 4, 8)
 # ── Data versioning ──────────────────────────────────────────────────────────
 
 def _dataframe_hash(df: pd.DataFrame) -> str:
-    """Compute a stable SHA-256 digest of a DataFrame's content for provenance tracking."""
+    """Compute a stable SHA-256 digest of a DataFrame's content for provenance tracking.
+
+    Note: only hashes head/tail samples + column names + shape.  Two DataFrames
+    that differ only in the middle can produce the same hash.  This is
+    intentionally fast (not cryptographically exhaustive) — it exists for
+    provenance logging, not correctness assertions.
+    """
     h = hashlib.sha256()
     # Hash column names (sorted for stability across column order)
     h.update(",".join(sorted(df.columns)).encode())
@@ -115,156 +121,87 @@ def compute_game_state_for_match(match_events: pd.DataFrame) -> dict[str, int]:
     return event_state
 
 
-def _process_single_match(args: tuple[int, pd.DataFrame, pd.DataFrame, set[int], str]) -> list[dict[str, Any]]:
-    """
-    Module-level worker for parallel match processing.
-    Returns a list of processed row dicts for one match.
-    """
-    match_id, match_events, frames_df, gk_ids, comp_name = args
-    rows: list[dict[str, Any]] = []
+def _fetch_lineups(match_id: int) -> dict[str, pd.DataFrame]:
+    """Fetch lineups for a match, returning an empty dict on failure."""
     try:
-        position_groups = get_player_position_groups(match_id, match_events)
-        game_states = compute_game_state_for_match(match_events)
-        paired_events = pair_pressure_with_ball_carrier(match_events, frames_df)
-        labeled_events = define_success(match_events, paired_events)
-
-        for item in labeled_events:
-            player_id = item.get("player_id")
-            if player_id in gk_ids:
-                continue
-
-            event_row = match_events[match_events["id"] == item["ball_carrier_event_id"]]
-            match_context: dict[str, Any] = {}
-            if not event_row.empty:
-                ev = event_row.iloc[0]
-                if "minute" in ev:
-                    match_context["minutes_elapsed"] = ev["minute"]
-                if "period" in ev:
-                    match_context["match_period"] = ev["period"]
-                match_context["game_state_diff"] = game_states.get(item["ball_carrier_event_id"], 0)
-
-            features = extract_spatial_features_from_frame(
-                frame_data=item["frame_data"],
-                ball_carrier_player_id=player_id,
-                team_id=item["team_id"],
-                opponent_team_id=item["opponent_team_id"],
-                match_context=match_context,
-            )
-            if features is None:
-                continue
-            if features.get("dist_nearest_opp", 999) > SPATIAL_CONFIG["tight_pressure_radius"]:
-                continue
-
-            intended_xt = compute_intended_xt(item, match_events)
-            if intended_xt is None:
-                continue
-
-            player_name = (
-                match_events[match_events["player_id"] == player_id]["player"].iloc[0]
-                if player_id in match_events["player_id"].values
-                else f"Player_{player_id}"
-            )
-            row: dict[str, Any] = {
-                "competition": comp_name,
-                "match_id": item["match_id"],
-                "pressure_event_id": item["pressure_event_id"],
-                "pressure_event_ids": item.get("pressure_event_ids", [item["pressure_event_id"]]),
-                "n_pressure_events": item.get("n_pressure_events", 1),
-                "ball_carrier_event_id": item["ball_carrier_event_id"],
-                "player_id": player_id,
-                "player_name": player_name,
-                "position_group": position_groups.get(player_id, "Midfielder"),
-                "team_id": item["team_id"],
-                "opponent_team_id": item["opponent_team_id"],
-                "success": item["success"],
-                "value_preserved": intended_xt,
-            }
-            row.update(features)
-            rows.append(row)
-    except Exception as e:
-        logger.warning(
-            "Match %d (%s) worker failed: %s\n%s",
-            match_id, comp_name, e, traceback.format_exc(),
-        )
-    if not rows:
-        logger.warning(
-            "Match %d (%s): worker produced 0 rows — all events filtered or no pressure events found",
-            match_id, comp_name,
-        )
-    return rows
-
-
-def get_goalkeeper_ids(match_id: int) -> set[int]:
-    """Get player IDs of goalkeepers from match lineups."""
-    try:
-        lineups = sb.lineups(match_id=match_id)
-        gk_ids: set[int] = set()
-        for team_name, lineup_df in lineups.items():
-            if "positions" in lineup_df.columns:
-                for _, player in lineup_df.iterrows():
-                    positions = player["positions"]
-                    if isinstance(positions, list):
-                        for pos_dict in positions:
-                            if isinstance(pos_dict, dict) and pos_dict.get("position") == "Goalkeeper":
-                                gk_ids.add(player["player_id"])
-                                break
-            elif "player_position" in lineup_df.columns:
-                gks = lineup_df[lineup_df["player_position"] == "Goalkeeper"]
-                gk_ids.update(gks["player_id"].values)
-        return gk_ids
+        return sb.lineups(match_id=match_id)
     except Exception as e:
         logger.debug("Could not load lineups for match %d: %s", match_id, e)
-        return set()
+        return {}
 
 
-def get_player_position_groups(
-    match_id: int,
+def get_goalkeeper_ids_from_lineups(lineups: dict[str, pd.DataFrame]) -> set[int]:
+    """Extract goalkeeper player IDs from pre-fetched lineup data."""
+    gk_ids: set[int] = set()
+    for team_name, lineup_df in lineups.items():
+        if "positions" in lineup_df.columns:
+            for _, player in lineup_df.iterrows():
+                positions = player["positions"]
+                if isinstance(positions, list):
+                    for pos_dict in positions:
+                        if isinstance(pos_dict, dict) and pos_dict.get("position") == "Goalkeeper":
+                            gk_ids.add(player["player_id"])
+                            break
+        elif "player_position" in lineup_df.columns:
+            gks = lineup_df[lineup_df["player_position"] == "Goalkeeper"]
+            gk_ids.update(gks["player_id"].values)
+    return gk_ids
+
+
+def get_player_position_groups_from_lineups(
+    lineups: dict[str, pd.DataFrame],
     match_events: pd.DataFrame | None = None,
 ) -> dict[int, str]:
     """
     Get position group (Defender/Midfielder/Forward) for each player.
-    Uses lineup data, and falls back to coordinate clustering if lineup is missing.
+    Uses pre-fetched lineup data, and falls back to coordinate clustering
+    if a player is missing from the lineups.
     """
     position_map: dict[int, str] = {}
-    try:
-        lineups = sb.lineups(match_id=match_id)
-        for team_name, lineup_df in lineups.items():
-            if "positions" in lineup_df.columns:
-                for _, player in lineup_df.iterrows():
-                    player_id: int = player["player_id"]
-                    positions = player["positions"]
+    for team_name, lineup_df in lineups.items():
+        if "positions" in lineup_df.columns:
+            for _, player in lineup_df.iterrows():
+                player_id: int = player["player_id"]
+                positions = player["positions"]
 
-                    if isinstance(positions, list) and len(positions) > 0:
-                        # Check all listed positions for the player
-                        assigned = False
-                        for pos_dict in positions:
-                            if isinstance(pos_dict, dict):
-                                pos_name: str = pos_dict.get("position", "").lower()
-                                if any(x in pos_name for x in ["back", "defender", "wing back"]):
-                                    position_map[player_id] = "Defender"
-                                    assigned = True
-                                    break
-                                elif any(x in pos_name for x in ["forward", "striker", "wing", "winger"]):
-                                    position_map[player_id] = "Forward"
-                                    assigned = True
-                                    break
-                                elif "midfield" in pos_name:
-                                    position_map[player_id] = "Midfielder"
-                                    assigned = True
-                                    break
-                        if not assigned:
-                            position_map[player_id] = "Midfielder"
-    except Exception as e:
-        logger.debug("Could not load lineups for match %d: %s", match_id, e)
+                if isinstance(positions, list) and len(positions) > 0:
+                    # Check all listed positions for the player
+                    assigned = False
+                    for pos_dict in positions:
+                        if isinstance(pos_dict, dict):
+                            pos_name: str = pos_dict.get("position", "").lower()
+                            if any(x in pos_name for x in ["back", "defender", "wing back"]):
+                                position_map[player_id] = "Defender"
+                                assigned = True
+                                break
+                            elif any(x in pos_name for x in ["forward", "striker", "wing", "winger"]):
+                                position_map[player_id] = "Forward"
+                                assigned = True
+                                break
+                            elif "midfield" in pos_name:
+                                position_map[player_id] = "Midfielder"
+                                assigned = True
+                                break
+                    if not assigned:
+                        position_map[player_id] = "Midfielder"
 
-    # Impute missing using event locations
+    # Impute missing using event locations (filter to open-play events
+    # to avoid skewing from goal kicks, throw-ins, etc.)
     if match_events is not None:
+        open_play_types = {"Pass", "Carry", "Dribble", "Ball Receipt*", "Shot"}
         all_players = match_events["player_id"].dropna().unique()
         for pid in all_players:
             if pid not in position_map:
                 player_events = match_events[
-                    (match_events["player_id"] == pid) & (match_events["location"].notna())
+                    (match_events["player_id"] == pid)
+                    & (match_events["location"].notna())
+                    & (match_events["type"].isin(open_play_types))
                 ]
+                if player_events.empty:
+                    # Fallback: use all events with locations
+                    player_events = match_events[
+                        (match_events["player_id"] == pid) & (match_events["location"].notna())
+                    ]
                 if not player_events.empty:
                     # Calculate average x coordinate (0 to 120)
                     locs = np.array(player_events["location"].tolist())
@@ -330,13 +267,112 @@ def compute_intended_xt(item: dict[str, Any], match_events: pd.DataFrame) -> flo
         if _is_valid_loc(end_loc):
             # pyrefly: ignore [unsupported-operation]
             next_xt = xt_value(end_loc[0], end_loc[1])
+    elif bc_event["type"] == "Dribble":
+        # StatsBomb dribbles do not have an explicit end_location field.
+        # Use the next event's location as the intended destination.
+        if bc_idx + 1 < len(match_events):
+            next_loc = match_events.iloc[bc_idx + 1].get("location")
+            if _is_valid_loc(next_loc):
+                # pyrefly: ignore [unsupported-operation]
+                next_xt = xt_value(next_loc[0], next_loc[1])
     elif bc_idx + 1 < len(match_events):
+        # Unknown carrier type — fall back to next event location
         next_loc = match_events.iloc[bc_idx + 1].get("location")
         if _is_valid_loc(next_loc):
             # pyrefly: ignore [unsupported-operation]
             next_xt = xt_value(next_loc[0], next_loc[1])
 
     return float(next_xt)
+
+
+def _process_single_match(
+    args: tuple[int, pd.DataFrame, pd.DataFrame, set[int], dict[int, str], str],
+) -> list[dict[str, Any]]:
+    """
+    Module-level worker for parallel match processing.
+    Returns a list of processed row dicts for one match.
+
+    Args tuple: (match_id, match_events, frames_df, gk_ids, position_groups, comp_name)
+    """
+    match_id, match_events, frames_df, gk_ids, position_groups, comp_name = args
+    rows: list[dict[str, Any]] = []
+    try:
+        game_states = compute_game_state_for_match(match_events)
+        paired_events = pair_pressure_with_ball_carrier(match_events, frames_df)
+        labeled_events = define_success(match_events, paired_events)
+
+        # Build O(1) event lookup to avoid per-item DataFrame filtering
+        event_lookup: dict[str, pd.Series] = {}
+        if "id" in match_events.columns:
+            for _, ev_row in match_events.iterrows():
+                eid = ev_row.get("id")
+                if isinstance(eid, str):
+                    event_lookup[eid] = ev_row
+
+        for item in labeled_events:
+            player_id = item.get("player_id")
+            if player_id in gk_ids:
+                continue
+
+            ev = event_lookup.get(item["ball_carrier_event_id"])
+            match_context: dict[str, Any] = {}
+            if ev is not None:
+                if "minute" in ev:
+                    match_context["minutes_elapsed"] = ev["minute"]
+                if "period" in ev:
+                    match_context["match_period"] = ev["period"]
+                match_context["game_state_diff"] = game_states.get(item["ball_carrier_event_id"], 0)
+
+            features = extract_spatial_features_from_frame(
+                frame_data=item["frame_data"],
+                ball_carrier_player_id=player_id,
+                team_id=item["team_id"],
+                opponent_team_id=item["opponent_team_id"],
+                match_context=match_context,
+            )
+            if features is None:
+                continue
+            if features.get("dist_nearest_opp", 999) > SPATIAL_CONFIG["tight_pressure_radius"]:
+                continue
+
+            intended_xt = compute_intended_xt(item, match_events)
+            if intended_xt is None:
+                continue
+
+            # Player name lookup via the event lookup dict
+            player_name = f"Player_{player_id}"
+            for _, ev_row in match_events[match_events["player_id"] == player_id].head(1).iterrows():
+                player_name = ev_row.get("player", player_name)
+                break
+
+            row: dict[str, Any] = {
+                "competition": comp_name,
+                "match_id": item["match_id"],
+                "pressure_event_id": item["pressure_event_id"],
+                "pressure_event_ids": item.get("pressure_event_ids", [item["pressure_event_id"]]),
+                "n_pressure_events": item.get("n_pressure_events", 1),
+                "ball_carrier_event_id": item["ball_carrier_event_id"],
+                "player_id": player_id,
+                "player_name": player_name,
+                "position_group": position_groups.get(player_id, "Midfielder"),
+                "team_id": item["team_id"],
+                "opponent_team_id": item["opponent_team_id"],
+                "success": item["success"],
+                "value_preserved": intended_xt,
+            }
+            row.update(features)
+            rows.append(row)
+    except Exception as e:
+        logger.warning(
+            "Match %d (%s) worker failed: %s\n%s",
+            match_id, comp_name, e, traceback.format_exc(),
+        )
+    if not rows:
+        logger.warning(
+            "Match %d (%s): worker produced 0 rows — all events filtered or no pressure events found",
+            match_id, comp_name,
+        )
+    return rows
 
 
 # ── Dataset builders ──────────────────────────────────────────────────────────
@@ -379,12 +415,23 @@ def build_all_datasets(include_holdout: bool = False) -> pd.DataFrame | None:
 
         match_ids = events_df["match_id"].unique()
 
-        # Pre-fetch goalkeeper IDs (I/O-bound API calls parallelised with threads)
-        gk_ids_by_match: dict[int, set[int]] = {}
+        # Pre-fetch lineup data ONCE per match (fixes double-API-call issue:
+        # previously get_goalkeeper_ids and get_player_position_groups each
+        # called sb.lineups() independently).
+        lineups_by_match: dict[int, dict[str, pd.DataFrame]] = {}
         with ThreadPoolExecutor(max_workers=N_WORKERS) as ex:
-            futures = {ex.submit(get_goalkeeper_ids, mid): mid for mid in match_ids}
+            futures = {ex.submit(_fetch_lineups, mid): mid for mid in match_ids}
             for fut in tqdm(futures, desc=f"Loading lineups ({comp_name})"):
-                gk_ids_by_match[futures[fut]] = fut.result()
+                lineups_by_match[futures[fut]] = fut.result()
+
+        # Derive GK IDs and position groups from the single lineups fetch
+        gk_ids_by_match: dict[int, set[int]] = {}
+        pos_groups_by_match: dict[int, dict[int, str]] = {}
+        for mid in match_ids:
+            lineups = lineups_by_match.get(mid, {})
+            gk_ids_by_match[mid] = get_goalkeeper_ids_from_lineups(lineups)
+            match_ev = events_df[events_df["match_id"] == mid]
+            pos_groups_by_match[mid] = get_player_position_groups_from_lineups(lineups, match_ev)
 
         # Build args list, skipping matches with no 360 data
         worker_args = [
@@ -392,6 +439,7 @@ def build_all_datasets(include_holdout: bool = False) -> pd.DataFrame | None:
              events_df[events_df["match_id"] == mid].copy().reset_index(drop=True),
              frames_dict[mid],
              gk_ids_by_match.get(mid, set()),
+             pos_groups_by_match.get(mid, {}),
              comp_name)
             for mid in match_ids
             if mid in frames_dict and not frames_dict[mid].empty
@@ -460,18 +508,27 @@ def build_holdout_dataset() -> None:
 
         match_ids = events_df["match_id"].unique()
 
-        # Pre-fetch GK IDs (I/O-bound API calls parallelised with threads)
-        gk_ids_by_match: dict[int, set[int]] = {}
+        # Single lineups fetch per match
+        lineups_by_match: dict[int, dict[str, pd.DataFrame]] = {}
         with ThreadPoolExecutor(max_workers=N_WORKERS) as ex:
-            futures = {ex.submit(get_goalkeeper_ids, mid): mid for mid in match_ids}
+            futures = {ex.submit(_fetch_lineups, mid): mid for mid in match_ids}
             for fut in tqdm(futures, desc="Loading holdout lineups"):
-                gk_ids_by_match[futures[fut]] = fut.result()
+                lineups_by_match[futures[fut]] = fut.result()
+
+        gk_ids_by_match: dict[int, set[int]] = {}
+        pos_groups_by_match: dict[int, dict[int, str]] = {}
+        for mid in match_ids:
+            lineups = lineups_by_match.get(mid, {})
+            gk_ids_by_match[mid] = get_goalkeeper_ids_from_lineups(lineups)
+            match_ev = events_df[events_df["match_id"] == mid]
+            pos_groups_by_match[mid] = get_player_position_groups_from_lineups(lineups, match_ev)
 
         worker_args = [
             (mid,
              events_df[events_df["match_id"] == mid].copy().reset_index(drop=True),
              frames_dict[mid],
              gk_ids_by_match.get(mid, set()),
+             pos_groups_by_match.get(mid, {}),
              comp_name)
             for mid in match_ids
             if mid in frames_dict and not frames_dict[mid].empty

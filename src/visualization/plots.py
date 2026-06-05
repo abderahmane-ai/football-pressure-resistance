@@ -1,5 +1,10 @@
 """Publication-ready figures from PRS model outputs."""
+from __future__ import annotations
+
 import logging
+
+import matplotlib
+matplotlib.use("Agg")  # Non-interactive backend; avoids TclError in headless environments (CI, Modal)
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -31,9 +36,15 @@ def plot_prs_leaderboard() -> None:
     sns.scatterplot(data=df, x='mean_Ball_Security_Score', y='mean_Value_Retention_Score',
                     hue='position_group', s=100, alpha=0.8, palette='Set1')
 
-    for i, row in df.iterrows():
-        plt.text(row['mean_Ball_Security_Score'] + 0.005, row['mean_Value_Retention_Score'],
-                 row['player_name'], fontsize=9)
+    # Only label top-5 players to avoid overlap; remaining points are
+    # identified by hover in interactive viewers or by the legend.
+    for i, row in df.head(5).iterrows():
+        plt.annotate(
+            row['player_name'],
+            (row['mean_Ball_Security_Score'], row['mean_Value_Retention_Score']),
+            xytext=(8, 4), textcoords='offset points', fontsize=9,
+            arrowprops=dict(arrowstyle='-', color='gray', lw=0.5),
+        )
 
     plt.axvline(0, color='grey', linestyle='--', alpha=0.5)
     plt.axhline(0, color='grey', linestyle='--', alpha=0.5)
@@ -99,13 +110,21 @@ def plot_stability_analysis() -> None:
 
     plt.figure(figsize=(9, 8))
 
+    # Determine the correct player name column (suffix depends on merge)
+    name_col = 'player_name_train' if 'player_name_train' in df.columns else 'player_name'
+
     sns.regplot(data=df, x='mean_PRS', y='residual',
                 scatter_kws={'alpha':0.5, 'color':'royalblue'},
                 line_kws={'color':'crimson', 'ls':'--'})
 
     top_players = df.sort_values(by='mean_PRS', ascending=False).head(5)
     for _, row in top_players.iterrows():
-        plt.text(row['mean_PRS'] + 0.001, row['residual'], row['player_name_train'], fontsize=9)
+        plt.annotate(
+            row[name_col],
+            (row['mean_PRS'], row['residual']),
+            xytext=(8, 4), textcoords='offset points', fontsize=9,
+            arrowprops=dict(arrowstyle='-', color='gray', lw=0.5),
+        )
 
     plt.axhline(0, color='grey', ls=':', alpha=0.5)
     plt.axvline(0, color='grey', ls=':', alpha=0.5)
@@ -119,8 +138,10 @@ def plot_stability_analysis() -> None:
     corr_path = TABLES_DIR / "holdout_metrics.csv"
     if corr_path.exists():
         metrics = pd.read_csv(corr_path).iloc[0]
+        p_val = metrics.get('pearson_p', 0.0)
+        p_text = f"p = {p_val:.4f}" if p_val >= 0.0001 else "p < 0.0001"
         plt.text(df['mean_PRS'].min(), df['residual'].max(),
-                 f"Pearson r = {metrics['pearson']:.3f}\n(p < 0.01)",
+                 f"Pearson r = {metrics['pearson']:.3f}\n({p_text})",
                  bbox=dict(facecolor='white', alpha=0.8), fontsize=10)
 
     plt.tight_layout()
@@ -141,7 +162,7 @@ def plot_marginal_curves() -> None:
         plt.title('Population Expected Value vs Nearest Opponent Distance', fontsize=12)
         plt.xlabel('Distance (Yards)')
         plt.ylabel('E[xT Preserved]')
-        plt.savefig(FIGURES_DIR / "3_marginal_dist.png")
+        plt.savefig(FIGURES_DIR / "3_marginal_dist.png", dpi=300)
         plt.close()
 
     if arc_path.exists():
@@ -152,7 +173,7 @@ def plot_marginal_curves() -> None:
         plt.title('Population Expected Value vs Opponent Coverage Arc', fontsize=12)
         plt.xlabel('Angular Span of Opponents (Radians)')
         plt.ylabel('E[xT Preserved]')
-        plt.savefig(FIGURES_DIR / "3_marginal_arc.png")
+        plt.savefig(FIGURES_DIR / "3_marginal_arc.png", dpi=300)
         plt.close()
 
 if __name__ == "__main__":

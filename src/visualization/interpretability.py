@@ -1,14 +1,18 @@
 """Posterior interpretability: feature importance, variance decomposition, marginal effects, ICE curves."""
+from __future__ import annotations
+from typing import Any
+
 import logging
 import pickle
 import warnings
+
+warnings.simplefilter(action='ignore', category=FutureWarning)
 
 import arviz as az
 import numpy as np
 import pandas as pd
 from scipy.special import expit
 
-warnings.simplefilter(action='ignore', category=FutureWarning)
 from config import (
     CROSS_VALIDATION_HOLDOUT,
     MODEL_TRACES_DIR,
@@ -21,10 +25,11 @@ logger = logging.getLogger(__name__)
 
 
 def run_interpretability_analysis() -> None:
+    """Generate feature importance, variance decomposition, marginal effects, and ICE curves."""
     holdout = CROSS_VALIDATION_HOLDOUT
     trace_path = MODEL_TRACES_DIR / f"pooled_trace_{holdout}.nc"
     if not trace_path.exists():
-        logger.warning(f"Trace not found for interpretability: {trace_path}")
+        logger.warning("Trace not found for interpretability: %s", trace_path)
         return
 
     trace = az.from_netcdf(trace_path)
@@ -154,9 +159,10 @@ def run_interpretability_analysis() -> None:
             })
         return pd.DataFrame(results)
 
+    # Grid capped at tight_pressure_radius; extrapolating beyond is
+    # out-of-distribution because the builder filters to ≤ 5 yards.
     if 'dist_nearest_opp' in feature_names:
         idx = feature_names.index('dist_nearest_opp')
-        # Grid capped at tight_pressure_radius; extrapolating beyond is out-of-distribution
         grid = np.linspace(0.5, SPATIAL_CONFIG['tight_pressure_radius'], 50)
         df_marginal = compute_marginal(idx, grid)
         df_marginal.to_csv(TABLES_DIR / "marginal_dist.csv", index=False)
@@ -178,7 +184,7 @@ def run_interpretability_analysis() -> None:
         theta_succ_samples = post['theta_succ'].values.reshape(-1, len(mappings['player']))
         theta_val_samples = post['theta_val'].values.reshape(-1, len(mappings['player']))
 
-        selected_players = []
+        selected_players: list[dict[str, Any]] = []
         for _, row in pd.concat([top_3, bottom_3]).iterrows():
             player_id = row['player_id']
             player_pos = row['position_group']
@@ -200,7 +206,7 @@ def run_interpretability_analysis() -> None:
             max_dist = SPATIAL_CONFIG['tight_pressure_radius']
             dist_grid = np.linspace(0.5, max_dist, 50)
 
-            ice_results = []
+            ice_results: list[dict[str, Any]] = []
             for player in selected_players:
                 p_theta_succ = theta_succ_samples[:, player['idx']]
                 p_theta_val = theta_val_samples[:, player['idx']]

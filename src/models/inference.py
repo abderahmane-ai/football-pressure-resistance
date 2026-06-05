@@ -39,6 +39,14 @@ def run_posterior_analysis() -> None:
     """
     Generate player leaderboards with Ball Security and Value Retention scores.
     Uses expit for numeric stability and appropriately handles the Hurdle model outputs.
+
+    Design note — PRS aggregation:
+    PRS = θ_succ + θ_val (additive on the logit scale). This gives equal
+    weight to ball security and value retention. Both θ terms live on the
+    logit scale with the same prior (Non-centered Normal), so addition is
+    scale-consistent. An alternative would be multiplicative on the
+    probability scale (p_succ × μ_val), but that conflates the two traits
+    and makes the ranking sensitive to the base rate.
     """
     holdout = CROSS_VALIDATION_HOLDOUT
     trace_path: Path = MODEL_TRACES_DIR / f"pooled_trace_{holdout}.nc"
@@ -105,6 +113,9 @@ def run_posterior_analysis() -> None:
         "Back_Loose":    {"dist_nearest_opp": loose_dist, "angle_nearest_opp": np.pi, "coverage_arc": 0.8},
     }
 
+    # Scenario feature vectors: unmentioned features are set to their
+    # standardized mean (zero in scaled space), representing the "average
+    # situation" baseline — an intentional design choice.
     scenario_vectors: dict[str, np.ndarray] = {}
     for name, s in scenarios.items():
         vec = np.zeros(len(feature_names))
@@ -185,6 +196,10 @@ def run_posterior_analysis() -> None:
             value_retention_samples: np.ndarray = theta_val[:, idx_num]
             prs_samples: np.ndarray = ball_security_samples + value_retention_samples
 
+            # Use ArviZ HDI for proper Highest Density Interval
+            # (not equal-tailed percentile interval)
+            hdi_bounds = az.hdi(prs_samples, hdi_prob=0.90)
+
             leaderboard.append({
                 "player_id": player_id,
                 "player_name": player_name,
@@ -192,8 +207,8 @@ def run_posterior_analysis() -> None:
                 "mean_Ball_Security_Score": float(ball_security_samples.mean()),
                 "mean_Value_Retention_Score": float(value_retention_samples.mean()),
                 "mean_PRS": float(prs_samples.mean()),
-                "hdi_5%": float(np.percentile(prs_samples, 5)),
-                "hdi_95%": float(np.percentile(prs_samples, 95)),
+                "hdi_5%": float(hdi_bounds[0]),
+                "hdi_95%": float(hdi_bounds[1]),
                 "n_events": n_events,
                 "best_under_scenario": best_scenario,
             })

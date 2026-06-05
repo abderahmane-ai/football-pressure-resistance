@@ -33,18 +33,18 @@ class TestAngularSpan:
     def test_opponents_spread_apart_give_larger_span(self):
         """Opponents on opposite sides of carrier block more total angle."""
         bc = [60.0, 40.0]
-        together = [[61.0, 40.5], [61.0, 41.0]]    # Clustered
-        spread   = [[61.0, 38.0], [61.0, 42.0]]    # Spread
+        together = [[62.0, 40.25], [62.0, 40.5]]    # Clustered
+        spread   = [[62.0, 40.0], [60.0, 42.0]]     # Spread
         assert angular_span(bc, spread, radius=5.0) > angular_span(bc, together, radius=5.0)
 
     def test_full_surround_exceeds_pi(self):
         """4 opponents on cardinal points = heavily surrounded."""
         bc = [60.0, 40.0]
         opps = [
-            [60.0, 41.0],  # N
-            [60.0, 39.0],  # S
-            [61.0, 40.0],  # E
-            [59.0, 40.0],  # W
+            [60.0, 40.3],  # N
+            [60.0, 39.7],  # S
+            [60.3, 40.0],  # E
+            [59.7, 40.0],  # W
         ]
         assert angular_span(bc, opps, radius=5.0) > np.pi
 

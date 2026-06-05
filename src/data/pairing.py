@@ -78,17 +78,20 @@ def pair_pressure_with_ball_carrier(
         return results
 
     pressure_events = events[events["type"] == "Pressure"]
-    events_lookup: dict[str, pd.Series] = {
-        row["id"]: row
-        for _, row in events.iterrows()
-        if isinstance(row.get("id"), str)
-    }
+
+    # O(1) event lookup via dict — avoids iterrows over the full DataFrame
+    events_lookup: dict[str, pd.Series] = {}
+    if "id" in events.columns:
+        events_indexed = events.set_index("id", drop=False)
+        for event_id, row in events_indexed.iterrows():
+            if isinstance(event_id, str):
+                events_lookup[event_id] = row
 
     # O(1) frame lookup by event_uuid
     frames_lookup: dict[str, dict[str, Any]] = {}
     if isinstance(frames_dict, pd.DataFrame) and not frames_dict.empty and "event_uuid" in frames_dict.columns:
-        for _, row in frames_dict.iterrows():
-            frames_lookup[row["event_uuid"]] = row.to_dict()
+        for event_uuid, row in frames_dict.set_index("event_uuid", drop=False).iterrows():
+            frames_lookup[str(event_uuid)] = row.to_dict()
 
     for _, pressure_event in pressure_events.iterrows():
         try:

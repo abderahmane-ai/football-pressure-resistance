@@ -86,6 +86,9 @@ def pitch_control_value(
     Gaussian pitch control model at ball-carrier location.
 
     Returns value in [-1, 1] representing net control (positive = teammate dominance).
+
+    Note: callers must ensure the ball-carrier is excluded from ``teammates``
+    to avoid a self-influence bias (distance=0 → maximum Gaussian weight).
     """
     bc_arr = np.asarray(bc, dtype=float)
     tm_influence = _gaussian_influence(bc_arr, teammates)
@@ -185,7 +188,11 @@ def _grid_voronoi_area(ball_carrier: Sequence[float], all_players: list[Sequence
 
 
 def angular_span(ball_carrier: Sequence[float], opponents: Sequence[Sequence[float]], radius: float) -> float:
-    """Calculate the angular span (coverage arc) of opponents within *radius* of the ball carrier."""
+    """Calculate the angular span (coverage arc) of opponents within *radius* of the ball carrier.
+
+    For a single opponent, uses the trigonometric body-width formula.
+    For multiple opponents, calculates the union of angular intervals on the circle.
+    """
     bc = np.asarray(ball_carrier, dtype=float)
     opps = np.asarray(opponents, dtype=float)
 
@@ -193,27 +200,51 @@ def angular_span(ball_carrier: Sequence[float], opponents: Sequence[Sequence[flo
         return 0.0
 
     distances = np.linalg.norm(opps - bc, axis=1)
-    close_opps = opps[distances <= radius]
+    close_mask = distances <= radius
+    close_opps = opps[close_mask]
+    close_dists = distances[close_mask]
 
     if len(close_opps) == 0:
         return 0.0
 
-    angles = np.arctan2(close_opps[:, 1] - bc[1], close_opps[:, 0] - bc[0])
-    angles = np.sort(angles)
+    player_width: float = SPATIAL_CONFIG["player_width"]
 
-    if len(angles) == 1:
-        dist = float(distances[distances <= radius][0])
-        dist = max(dist, 0.01)  # Guard against division by zero at point-blank range
-        player_width: float = SPATIAL_CONFIG["player_width"]
-        return float(2.0 * np.arctan((player_width / 2.0) / dist))
+    # Calculate intervals [theta - w, theta + w] mapped to [0, 2*pi]
+    intervals: list[tuple[float, float]] = []
+    for opp, dist in zip(close_opps, close_dists):
+        theta = np.arctan2(opp[1] - bc[1], opp[0] - bc[0])
+        w = np.arctan((player_width / 2.0) / max(dist, 0.01))
+        
+        start = theta - w
+        end = theta + w
+        
+        if end - start >= 2 * np.pi:
+            return 2 * np.pi
+            
+        start_mod = start % (2 * np.pi)
+        end_mod = start_mod + (end - start)
+        
+        if end_mod <= 2 * np.pi:
+            intervals.append((start_mod, end_mod))
+        else:
+            intervals.append((start_mod, 2 * np.pi))
+            intervals.append((0.0, end_mod - 2 * np.pi))
 
-    angles_wrapped = np.append(angles, angles[0] + 2 * np.pi)
-    gaps = np.diff(angles_wrapped)
-    max_gap = float(np.max(gaps))
+    # Sort intervals by start
+    intervals.sort(key=lambda x: x[0])
 
-    span = 2 * np.pi - max_gap
-    # pyrefly: ignore [unnecessary-type-conversion]
-    return float(span)
+    # Merge intervals
+    merged: list[list[float]] = []
+    for start, end in intervals:
+        if not merged or merged[-1][1] < start:
+            merged.append([start, end])
+        else:
+            merged[-1][1] = max(merged[-1][1], end)
+
+    # Sum lengths of disjoint intervals
+    total_span = sum(end - start for start, end in merged)
+    return float(np.clip(total_span, 0.0, 2 * np.pi))
+
 
 
 def lane_unblocked(

@@ -69,6 +69,10 @@ def extract_spatial_features_from_frame(
     goal_y: float = SPATIAL_CONFIG["goal_y"]
     coverage_radius: float = SPATIAL_CONFIG["coverage_arc_radius"]
 
+    # Pre-compute goal angle (used for both opponent and teammate orientation)
+    goal_vec = np.array([goal_x, goal_y]) - bc
+    goal_angle: float = float(np.arctan2(goal_vec[1], goal_vec[0]))
+
     if len(opps) > 0:
         opp_dists = np.linalg.norm(opps - bc, axis=1)
         sorted_opp_dists = np.sort(opp_dists)
@@ -79,8 +83,6 @@ def extract_spatial_features_from_frame(
         features["opps_within_4yd"] = int(np.sum(sorted_opp_dists <= 4))
 
         nearest_opp = opps[np.argmin(opp_dists)]
-        goal_vec = np.array([goal_x, goal_y]) - bc
-        goal_angle = np.arctan2(goal_vec[1], goal_vec[0])
         opp_vec = nearest_opp - bc
         opp_angle = np.arctan2(opp_vec[1], opp_vec[0])
 
@@ -138,7 +140,6 @@ def extract_spatial_features_from_frame(
 
         tm_vec = free_tms_arr[min_tm_idx] - bc
         tm_angle = np.arctan2(tm_vec[1], tm_vec[0])
-        goal_angle = np.arctan2(goal_y - bc[1], goal_x - bc[0])
         rel_tm_angle = tm_angle - goal_angle
         rel_tm_angle = (rel_tm_angle + np.pi) % (2 * np.pi) - np.pi
         features["angle_nearest_free_teammate"] = float(rel_tm_angle)
@@ -146,7 +147,10 @@ def extract_spatial_features_from_frame(
         features["dist_nearest_free_teammate"] = pitch_len
         features["angle_nearest_free_teammate"] = 0.0
 
-    # Progressive option: teammate closer to goal in higher xT, with unblocked lane
+    # Progressive option: teammate closer to goal in higher xT, with unblocked lane.
+    # has_progressive_option is a binary indicator (0 or 1). After StandardScaler
+    # centering/scaling it becomes a continuous value, which is valid but means the
+    # model coefficient represents a per-SD effect rather than a per-unit effect.
     features["has_progressive_option"] = 0
     bc_xt = xt_value(bc[0], bc[1])
 

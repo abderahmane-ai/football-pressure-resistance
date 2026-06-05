@@ -27,15 +27,21 @@ warnings.simplefilter(action="ignore", category=FutureWarning)
 
 logger = logging.getLogger(__name__)
 
+# Platforms accepted by the JAX/GPU verification.
+# - "gpu" / "cuda": NVIDIA GPUs via CUDA
+# - "metal": Apple Silicon via jax-metal
+_ACCEPTED_GPU_PLATFORMS: frozenset[str] = frozenset({"gpu", "cuda", "metal"})
+
 
 # ── JAX / device verification ────────────────────────────────────────────────
 
-def _verify_jax_gpu() -> str:
-    """Hard-fail if JAX cannot see the GPU.
+def _verify_jax_device() -> str:
+    """Verify that JAX can see a hardware accelerator.
 
-    The fallback path (PyMC default NUTS, sequential chains) is tens of times
-    slower on this model and is the single most common cause of multi-hour
-    training runs. We refuse to enter it silently.
+    Accepts NVIDIA CUDA GPUs and Apple Silicon Metal.  Falls back to CPU
+    only when the ``PRS_ALLOW_CPU`` environment variable is explicitly set
+    to ``1`` — this prevents silent multi-hour runs on cloud instances
+    where the GPU driver failed to load.
     """
     try:
         import jax
@@ -46,17 +52,29 @@ def _verify_jax_gpu() -> str:
         ) from exc
 
     devices = jax.devices()
-    platform = devices[0].platform if devices else "unknown"
-    if platform != "gpu" and platform != "cuda":
-        raise RuntimeError(
-            f"JAX is running on platform '{platform}', not GPU. "
-            f"Devices: {devices}. "
-            "The NumPyro fallback (CPU) is disabled to prevent multi-hour runs. "
-            "Set the env var JAX_PLATFORMS=cuda and ensure the A100 driver is "
-            "visible inside the container."
+    platform = devices[0].platform.lower() if devices else "unknown"
+
+    if platform in _ACCEPTED_GPU_PLATFORMS:
+        logger.info("JAX is using accelerator: %s (%s)", devices[0], platform)
+        return platform
+
+    # CPU fallback — only when explicitly opted-in
+    if os.environ.get("PRS_ALLOW_CPU", "") == "1":
+        logger.warning(
+            "JAX is running on platform '%s' (CPU). GPU/Metal not detected. "
+            "Continuing because PRS_ALLOW_CPU=1 is set. Expect SLOW sampling.",
+            platform,
         )
-    logger.info("JAX is using GPU: %s", devices[0])
-    return platform
+        return platform
+
+    raise RuntimeError(
+        f"JAX is running on platform '{platform}', not a supported accelerator "
+        f"({', '.join(sorted(_ACCEPTED_GPU_PLATFORMS))}). "
+        f"Devices: {devices}. "
+        "The CPU fallback is disabled to prevent multi-hour runs. "
+        "Set PRS_ALLOW_CPU=1 to override, or ensure a GPU/Metal device is visible "
+        "(e.g. JAX_PLATFORMS=cuda, pip install jax-metal)."
+    )
 
 
 # ── Intermediate caching ─────────────────────────────────────────────────────
@@ -201,7 +219,7 @@ def fit_pooled_model() -> az.InferenceData | None:
     MODEL_TRACES_DIR.mkdir(parents=True, exist_ok=True)
 
     cached = _load_cached_scaler(scaler_path)
-    if cached is not None and cached["max_value"] == max_value:
+    if cached is not None and np.isclose(cached["max_value"], max_value):
         scaler: StandardScaler = cached["scaler"]
         X_scaled: np.ndarray = scaler.transform(X)
         logger.info("Loaded cached scaler from %s", scaler_path)
@@ -341,13 +359,14 @@ def fit_pooled_model() -> az.InferenceData | None:
             MODEL_SETTINGS["nuts_sampler"],
         )
 
-        # Refuse to silently fall back to the slow CPU NUTS path.
-        _verify_jax_gpu()
+        # Verify JAX device (GPU/Metal/CPU-with-opt-in)
+        platform = _verify_jax_device()
 
         # chain_method='vectorized' uses vmap to run all chains simultaneously
-        # on a single GPU device — the only correct choice for 1×A100.
+        # on a single device — the only correct choice for 1×GPU.
         # 'parallel' (pmap) requires one device per chain and silently falls
         # back to sequential with a single GPU, giving a 4× slowdown.
+        # On CPU (PRS_ALLOW_CPU=1), vectorized is still the best option.
         trace = pm.sample(
             draws=MODEL_SETTINGS["draws"],
             tune=MODEL_SETTINGS["tune"],
