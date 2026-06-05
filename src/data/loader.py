@@ -158,14 +158,22 @@ def load_all_competitions(
     for comp_name in tqdm(competition_names, desc="Loading competitions"):
         comp_info = COMPETITIONS[comp_name]
 
-        # Load or download events
         events_path = RAW_DATA_DIR / comp_name / "events.parquet"
-        if events_path.exists():
-            events_df = pd.read_parquet(events_path)
-        else:
-            logger.info("Events not cached for %s, downloading...", comp_name)
+        frames_dir = RAW_DATA_DIR / comp_name / "frames"
+
+        # Check if frames folder exists and has at least one .parquet or .pkl file
+        has_frames = False
+        if frames_dir.exists():
+            for f in frames_dir.glob("*"):
+                if f.suffix in (".parquet", ".pkl"):
+                    has_frames = True
+                    break
+
+        if not events_path.exists() or not has_frames:
+            logger.info("Data not fully cached for %s, ensuring download...", comp_name)
             download_all(comp_name)
-            events_df = pd.read_parquet(events_path)
+
+        events_df = pd.read_parquet(events_path)
         validate_statsbomb_events(events_df, context=f"{comp_name} events")
 
         # Load frames (supports both parquet and legacy pickle)

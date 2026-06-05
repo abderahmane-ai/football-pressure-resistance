@@ -298,8 +298,12 @@ def _process_single_match(
     rows: list[dict[str, Any]] = []
     try:
         game_states = compute_game_state_for_match(match_events)
+        n_pressure = len(match_events[match_events["type"] == "Pressure"])
+        logger.debug("Match %d: events=%d, pressure_events=%d", match_id, len(match_events), n_pressure)
         paired_events = pair_pressure_with_ball_carrier(match_events, frames_df)
+        logger.debug("Match %d: paired_events=%d", match_id, len(paired_events))
         labeled_events = define_success(match_events, paired_events)
+        logger.debug("Match %d: labeled_events=%d", match_id, len(labeled_events))
 
         # Build O(1) event lookup to avoid per-item DataFrame filtering
         event_lookup: dict[str, pd.Series] = {}
@@ -308,6 +312,11 @@ def _process_single_match(
                 eid = ev_row.get("id")
                 if isinstance(eid, str):
                     event_lookup[eid] = ev_row
+
+        n_labeled = len(labeled_events)
+        n_features_ok = 0
+        n_dist_ok = 0
+        n_xt_ok = 0
 
         for item in labeled_events:
             player_id = item.get("player_id")
@@ -332,12 +341,15 @@ def _process_single_match(
             )
             if features is None:
                 continue
+            n_features_ok += 1
             if features.get("dist_nearest_opp", 999) > SPATIAL_CONFIG["tight_pressure_radius"]:
                 continue
+            n_dist_ok += 1
 
             intended_xt = compute_intended_xt(item, match_events)
             if intended_xt is None:
                 continue
+            n_xt_ok += 1
 
             # Player name lookup via the event lookup dict
             player_name = f"Player_{player_id}"
@@ -368,6 +380,7 @@ def _process_single_match(
             match_id, comp_name, e, traceback.format_exc(),
         )
     if not rows:
+        logger.debug("Match %d: n_labeled=%d, n_features_ok=%d, n_dist_ok=%d, n_xt_ok=%d", match_id, n_labeled, n_features_ok, n_dist_ok, n_xt_ok)
         logger.warning(
             "Match %d (%s): worker produced 0 rows — all events filtered or no pressure events found",
             match_id, comp_name,

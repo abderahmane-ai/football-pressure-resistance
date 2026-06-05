@@ -77,6 +77,13 @@ def pair_pressure_with_ball_carrier(
     if events.empty:
         return results
 
+    logger.debug(
+        "pairing (match %s): events=%d, frames=%s",
+        events['match_id'].iloc[0] if 'match_id' in events.columns else 'unknown',
+        len(events),
+        len(frames_dict) if hasattr(frames_dict, 'len') or isinstance(frames_dict, pd.DataFrame) else 'no_len'
+    )
+
     pressure_events = events[events["type"] == "Pressure"]
 
     # O(1) event lookup via dict — avoids iterrows over the full DataFrame

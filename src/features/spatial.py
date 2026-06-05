@@ -27,7 +27,9 @@ def extract_spatial_features_from_frame(
     if pd.isna(frame_data) or not isinstance(frame_data, dict):
         return None
 
-    freeze_frame: list[dict] = frame_data.get("freeze_frame", [])
+    freeze_frame = frame_data.get("freeze_frame", [])
+    if isinstance(freeze_frame, np.ndarray):
+        freeze_frame = freeze_frame.tolist()
     if not isinstance(freeze_frame, list) or len(freeze_frame) == 0:
         return None
 
@@ -38,7 +40,7 @@ def extract_spatial_features_from_frame(
 
     for p in freeze_frame:
         loc = p.get("location")
-        if not loc or len(loc) < 2:
+        if loc is None or len(loc) < 2:
             continue
 
         all_players.append(loc)

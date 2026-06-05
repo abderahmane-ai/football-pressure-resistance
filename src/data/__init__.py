@@ -2,15 +2,15 @@
 
 from src.data.labels import define_success
 from src.data.pairing import (
-                              BALL_CARRIER_EVENT_TYPES,
-                              dedupe_pressure_events_by_carrier,
-                              pair_pressure_with_ball_carrier,
+    BALL_CARRIER_EVENT_TYPES,
+    dedupe_pressure_events_by_carrier,
+    pair_pressure_with_ball_carrier,
 )
 from src.data.validation import (
-                              DataValidationError,
-                              validate_model_dataset,
-                              validate_statsbomb_events,
-                              validate_statsbomb_frames,
+    DataValidationError,
+    validate_model_dataset,
+    validate_statsbomb_events,
+    validate_statsbomb_frames,
 )
 
 __all__ = [

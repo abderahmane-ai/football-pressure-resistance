@@ -1,8 +1,6 @@
 """Tests for geometry primitives: voronoi, pitch control, lane clearance, xT lookup."""
 import numpy as np
-import pytest
 
-from config import SPATIAL_CONFIG
 from src.features.geometry import (
     angular_span,
     lane_unblocked,

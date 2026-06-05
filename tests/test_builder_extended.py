@@ -1,9 +1,8 @@
 """Tests for builder helper functions: normalise_related_events, compute_intended_xt, compute_game_state."""
 import numpy as np
 import pandas as pd
-import pytest
 
-from src.data.builder import compute_intended_xt, compute_game_state_for_match
+from src.data.builder import compute_intended_xt
 from src.data.pairing import _normalise_related_events
 
 

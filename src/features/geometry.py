@@ -214,16 +214,16 @@ def angular_span(ball_carrier: Sequence[float], opponents: Sequence[Sequence[flo
     for opp, dist in zip(close_opps, close_dists):
         theta = np.arctan2(opp[1] - bc[1], opp[0] - bc[0])
         w = np.arctan((player_width / 2.0) / max(dist, 0.01))
-        
+
         start = theta - w
         end = theta + w
-        
+
         if end - start >= 2 * np.pi:
             return 2 * np.pi
-            
+
         start_mod = start % (2 * np.pi)
         end_mod = start_mod + (end - start)
-        
+
         if end_mod <= 2 * np.pi:
             intervals.append((start_mod, end_mod))
         else:

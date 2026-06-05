@@ -1,10 +1,10 @@
 """Posterior interpretability: feature importance, variance decomposition, marginal effects, ICE curves."""
 from __future__ import annotations
-from typing import Any
 
 import logging
 import pickle
 import warnings
+from typing import Any
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 

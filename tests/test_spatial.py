@@ -1,8 +1,7 @@
 """Tests for src.features.spatial.extract_spatial_features_from_frame."""
 import numpy as np
-import pytest
 
-from config import MODEL_FEATURE_COLUMNS, SPATIAL_CONFIG
+from config import MODEL_FEATURE_COLUMNS
 from src.features.spatial import extract_spatial_features_from_frame
 
 
@@ -139,3 +138,16 @@ class TestContextPropagation:
         assert result is not None
         assert result["bc_x"] == 60.0
         assert result["bc_y"] == 40.0
+
+    def test_supports_numpy_array_freeze_frame(self):
+        ff = np.array([
+            {"location": np.array([60, 40]), "actor": True, "teammate": True, "player_id": "p1"},
+            {"location": np.array([62, 40]), "actor": False, "teammate": False, "player_id": "op1"},
+        ])
+        frame = {"freeze_frame": ff}
+        result = extract_spatial_features_from_frame(
+            frame, "p1", "A", "B"
+        )
+        assert result is not None
+        assert result["bc_x"] == 60.0
+

@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 
 import matplotlib
+
 matplotlib.use("Agg")  # Non-interactive backend; avoids TclError in headless environments (CI, Modal)
 
 import matplotlib.pyplot as plt
