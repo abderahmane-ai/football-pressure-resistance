@@ -6,8 +6,6 @@ import pickle
 import warnings
 from typing import Any
 
-warnings.simplefilter(action='ignore', category=FutureWarning)
-
 import arviz as az
 import numpy as np
 import pandas as pd
@@ -20,6 +18,8 @@ from config import (
     SPATIAL_CONFIG,
     TABLES_DIR,
 )
+
+warnings.simplefilter(action='ignore', category=FutureWarning)
 
 logger = logging.getLogger(__name__)
 

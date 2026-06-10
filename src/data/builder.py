@@ -1,10 +1,10 @@
 """Build processed pressure datasets from raw StatsBomb data."""
 from __future__ import annotations
 
-from typing import Any
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 
 import pandas as pd
 from tqdm import tqdm
@@ -15,11 +15,17 @@ from config import (
     MODEL_FEATURE_COLUMNS,
     PROCESSED_DATA_DIR,
 )
-from src.data.loader import load_all_competitions
-from src.data.validation import (
-    validate_model_dataset,
-    validate_statsbomb_events,
-    validate_statsbomb_frames,
+from src.data.events import (
+    _is_valid_loc as _is_valid_loc,
+)
+from src.data.events import (
+    _process_single_match,
+)
+from src.data.events import (
+    compute_game_state_for_match as compute_game_state_for_match,
+)
+from src.data.events import (
+    compute_intended_xt as compute_intended_xt,
 )
 
 # Import sub-modules for builder logic and expose them for backward compatibility
@@ -28,11 +34,11 @@ from src.data.lineups import (
     get_goalkeeper_ids_from_lineups,
     get_player_position_groups_from_lineups,
 )
-from src.data.events import (
-    _is_valid_loc,
-    _process_single_match,
-    compute_game_state_for_match,
-    compute_intended_xt,
+from src.data.loader import load_all_competitions
+from src.data.validation import (
+    validate_model_dataset,
+    validate_statsbomb_events,
+    validate_statsbomb_frames,
 )
 from src.data.writer import (
     _dataframe_hash,

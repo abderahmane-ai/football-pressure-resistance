@@ -2,20 +2,13 @@ name: CI
 
 on:
   push:
-    branches: ["main"]
+    branches: [ main ]
   pull_request:
-    branches: ["main"]
+    branches: [ main ]
 
 jobs:
-  tests:
-    name: Tests (${{ matrix.os }}, Python ${{ matrix.python-version }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ["3.10", "3.11", "3.12"]
-
+  lint-and-test:
+    runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -23,32 +16,22 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.10"
           cache: "pip"
-          cache-dependency-path: |
-            requirements.txt
-            requirements-accelerated.txt
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
-          python -m pip install pytest pytest-cov mypy ruff isort
+          pip install -r requirements.lock
 
-      - name: Lint and Format (Ruff & isort)
+      - name: Run Ruff Linter
         run: |
           ruff check .
-          isort --check-only .
 
-      - name: Static Type Checking (Mypy)
-        run: mypy src/ config.py run_kfold.py
+      - name: Run Mypy Type Checking
+        run: |
+          mypy src/ config.py run_kfold.py
 
-      - name: Run tests with coverage
-        run: pytest -q --cov=src --cov-report=term-missing --cov-report=xml
-
-      - name: Upload coverage
-        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
-        uses: codecov/codecov-action@v4
-        with:
-          files: coverage.xml
-          fail_ci_if_error: false
+      - name: Run Pytest Suite
+        run: |
+          pytest

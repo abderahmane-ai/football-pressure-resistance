@@ -53,7 +53,6 @@ def test_prepare_model_dataset_requires_success_rows_for_beta_component():
 
 
 def test_mcmc_smoke(tmp_path, monkeypatch):
-    import os
     from config import CROSS_VALIDATION_HOLDOUT
     from src.models import bayesian
 

@@ -23,7 +23,8 @@ except AttributeError:
 def plot_prs_leaderboard() -> None:
     """Plot top players on a 2D plane: Ball Security vs Value Retention."""
     path = TABLES_DIR / "prs_leaderboard.csv"
-    if not path.exists(): return
+    if not path.exists():
+        return
 
     df = pd.read_csv(path)
     if df.empty:
@@ -62,7 +63,8 @@ def plot_prs_leaderboard() -> None:
 def plot_feature_importance() -> None:
     """Plot standardized coefficients for spatial features (Turnover vs Value)."""
     path = TABLES_DIR / "feature_importance.csv"
-    if not path.exists(): return
+    if not path.exists():
+        return
 
     df = pd.read_csv(path, index_col=0)
     if df.empty:
@@ -103,7 +105,8 @@ def plot_feature_importance() -> None:
 def plot_stability_analysis() -> None:
     """Scatter plot: Training PRS vs Holdout Residuals."""
     path = TABLES_DIR / "holdout_correlation_data.csv"
-    if not path.exists(): return
+    if not path.exists():
+        return
 
     df = pd.read_csv(path)
     if df.empty:

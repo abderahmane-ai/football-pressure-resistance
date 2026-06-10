@@ -69,7 +69,7 @@ def main() -> None:
 
         env = os.environ.copy()
         env["PRS_HOLDOUT"] = holdout
-        
+
         # Check if trace already exists on the persistent volume to avoid rerunning MCMC (55 min/fold)
         trace_file = Path("outputs/model_traces") / f"pooled_trace_{holdout}.nc"
         if trace_file.exists() and os.environ.get("FORCE_RETRAIN", "") != "1":

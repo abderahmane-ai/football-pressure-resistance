@@ -156,7 +156,6 @@ def load_all_competitions(
     all_data: dict[str, dict] = {}
 
     for comp_name in tqdm(competition_names, desc="Loading competitions"):
-        comp_info = COMPETITIONS[comp_name]
 
         events_path = RAW_DATA_DIR / comp_name / "events.parquet"
         frames_dir = RAW_DATA_DIR / comp_name / "frames"

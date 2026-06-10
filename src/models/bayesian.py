@@ -360,7 +360,7 @@ def fit_pooled_model() -> az.InferenceData | None:
         )
 
         # Verify JAX device (GPU/Metal/CPU-with-opt-in)
-        platform = _verify_jax_device()
+        _verify_jax_device()
 
         # chain_method='vectorized' uses vmap to run all chains simultaneously
         # on a single device — the only correct choice for 1×GPU.
