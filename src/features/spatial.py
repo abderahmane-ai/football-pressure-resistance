@@ -173,6 +173,7 @@ def extract_spatial_features_from_frame(
         features["minutes_elapsed"] = match_context.get("minutes_elapsed", 0)
         features["match_period"] = match_context.get("match_period", 1)
         features["counter_press"] = 1.0 if match_context.get("counter_press", False) else 0.0
+        features["recent_pressures"] = float(match_context.get("recent_pressures", 0))
         ph = int(match_context.get("pass_height_id", 0))
         features["pass_height_ground"] = 1.0 if ph == 1 else 0.0
         features["pass_height_low"] = 1.0 if ph == 2 else 0.0
@@ -182,6 +183,7 @@ def extract_spatial_features_from_frame(
         features["minutes_elapsed"] = 0
         features["match_period"] = 1
         features["counter_press"] = 0.0
+        features["recent_pressures"] = 0.0
         features["pass_height_ground"] = 0.0
         features["pass_height_low"] = 0.0
         features["pass_height_high"] = 0.0

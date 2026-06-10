@@ -184,6 +184,10 @@ def _process_single_match(
     """
     match_id, match_events, frames_df, gk_ids, position_groups, comp_name = args
     rows: list[dict[str, Any]] = []
+    n_labeled = 0
+    n_features_ok = 0
+    n_dist_ok = 0
+    n_xt_ok = 0
     try:
         game_states = compute_game_state_for_match(match_events)
         n_pressure = len(match_events[match_events["type"] == "Pressure"])
@@ -225,9 +229,27 @@ def _process_single_match(
                 logger.debug("VAEP computation failed for match %d, falling back to xT", match_id)
 
         n_labeled = len(labeled_events)
-        n_features_ok = 0
-        n_dist_ok = 0
-        n_xt_ok = 0
+
+        # Build set of ball-carrier events that are under pressure (for temporal density)
+        pressure_bc_ids: set[str] = {item["ball_carrier_event_id"] for item in labeled_events}
+
+        # Chronological touch sequences per player to compute rolling pressures count
+        player_carrier_events: dict[int, list[dict[str, Any]]] = {}
+        for ev in match_events_list:
+            if ev.get("type") in {"Pass", "Carry", "Dribble"}:
+                pid = ev.get("player_id")
+                if pid is not None:
+                    if pid not in player_carrier_events:
+                        player_carrier_events[pid] = []
+                    player_carrier_events[pid].append(ev)
+
+        recent_pressures_lookup: dict[str, int] = {}
+        for pid, evs in player_carrier_events.items():
+            for idx, ev in enumerate(evs):
+                start_idx = max(0, idx - 5)
+                prior_evs = evs[start_idx:idx]
+                n_press = sum(1 for pev in prior_evs if pev.get("id") in pressure_bc_ids)
+                recent_pressures_lookup[ev["id"]] = n_press
 
         for item in labeled_events:
             player_id = item.get("player_id")
@@ -263,6 +285,11 @@ def _process_single_match(
                     match_context["pass_height_id"] = 0
             else:
                 match_context["pass_height_id"] = 0
+
+            # Count how many of this player's last 5 carrier events were under
+            # pressure — a proxy for sustained pressure intensity that the
+            # static freeze-frame cannot capture (fatigue, targeted pressing).
+            match_context["recent_pressures"] = recent_pressures_lookup.get(item["ball_carrier_event_id"], 0)
 
             features = extract_spatial_features_from_frame(
                 frame_data=item["frame_data"],

@@ -19,6 +19,7 @@ from config import (
     MODEL_FEATURE_COLUMNS,
     MODEL_SETTINGS,
     MODEL_TRACES_DIR,
+    POSITION_SPECIFIC_FEATURES,
     PROCESSED_DATA_DIR,
 )
 from src.data.validation import DataValidationError, validate_model_dataset
@@ -106,6 +107,7 @@ def _save_scaler(
     max_value: float,
     epsilon: float,
     spline_transformers: dict[str, Any] | None = None,
+    position_specific_features: list[str] | None = None,
 ) -> None:
     """Persist scaler, feature list, and scaling constants."""
     with open(path, "wb") as f:
@@ -115,7 +117,23 @@ def _save_scaler(
             "max_value": max_value,
             "epsilon": epsilon,
             "spline_transformers": spline_transformers,
+            "position_specific_features": position_specific_features or POSITION_SPECIFIC_FEATURES,
         }, f)
+
+
+def _is_position_specific(feature_name: str) -> bool:
+    """Check whether *feature_name* should have position-group-specific slopes.
+
+    A feature is position-specific if its (or its B-spline root's) name appears
+    in ``POSITION_SPECIFIC_FEATURES``.  Spline columns like ``dist_nearest_opp_spline_3``
+    inherit the position-specific flag from their root feature.
+    """
+    if feature_name in POSITION_SPECIFIC_FEATURES:
+        return True
+    for root in POSITION_SPECIFIC_FEATURES:
+        if feature_name.startswith(f"{root}_spline_"):
+            return True
+    return False
 
 
 def _save_mappings(
@@ -243,8 +261,24 @@ def fit_pooled_model() -> az.InferenceData | None:
     else:
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X)
-        _save_scaler(scaler_path, scaler, available_features, max_value, epsilon, spline_transformers)
+        _save_scaler(scaler_path, scaler, available_features, max_value, epsilon,
+                     spline_transformers, position_specific_features=list(POSITION_SPECIFIC_FEATURES))
         logger.info("Fitted and saved new scaler to %s", scaler_path)
+
+    # ── Split into global vs. position-specific features ─────────────────
+    pos_specific_mask: np.ndarray = np.array(
+        [_is_position_specific(f) for f in available_features]
+    )
+    global_mask: np.ndarray = ~pos_specific_mask
+    n_features_global: int = int(global_mask.sum())
+    n_features_pos_specific: int = int(pos_specific_mask.sum())
+    logger.info(
+        "Features: %d global, %d position-specific (of %d total)",
+        n_features_global, n_features_pos_specific, len(available_features),
+    )
+
+    X_scaled_global: np.ndarray = X_scaled[:, global_mask]
+    X_scaled_pos_specific: np.ndarray = X_scaled[:, pos_specific_mask]
 
     # ── Categorical indices ───────────────────────────────────────────────
     player_cats = df["player_id"].astype("category")
@@ -288,7 +322,8 @@ def fit_pooled_model() -> az.InferenceData | None:
 
     # Beta model subset: successes only
     mask: np.ndarray = y_success == 1
-    X_val: np.ndarray = X_scaled[mask]
+    X_val_global: np.ndarray = X_scaled_global[mask]
+    X_val_pos_specific: np.ndarray = X_scaled_pos_specific[mask]
     y_val_scaled: np.ndarray = y_value_scaled[mask]
     player_idx_val: np.ndarray = player_idx[mask]
     comp_idx_val: np.ndarray = comp_idx[mask]
@@ -304,7 +339,8 @@ def fit_pooled_model() -> az.InferenceData | None:
         # the JIT-compiled function, while SharedVariables require XLA to
         # read them at every step. The data is observation-only and never
         # mutated during sampling, so there is no functional difference.
-        X_data_succ = X_scaled
+        X_data_global = X_scaled_global
+        X_data_pos_specific = X_scaled_pos_specific
         pid_succ = player_idx
         cid_succ = comp_idx
         oid_succ = opp_idx
@@ -312,8 +348,17 @@ def fit_pooled_model() -> az.InferenceData | None:
         posid_succ = pos_idx
 
         alpha_succ = pm.Normal("alpha_succ", 0, 1.5)
-        beta_succ = pm.Normal("beta_succ", 0, 1.0, shape=n_features)
         gamma_pos_succ = pm.Normal("gamma_pos_succ", 0, 1.0, shape=n_pos)
+
+        # Global (non-position-specific) coefficients
+        beta_global_succ = pm.Normal("beta_global_succ", 0, 1.0, shape=n_features_global)
+
+        # Position-group-specific coefficients with hierarchical shrinkage
+        beta_pos_global_succ = pm.Normal("beta_pos_global_succ", 0, 1.0, shape=n_features_pos_specific)
+        sigma_pos_succ = pm.HalfNormal("sigma_pos_succ", 0.5, shape=n_features_pos_specific)
+        beta_pos_raw_succ = pm.Normal("beta_pos_raw_succ", 0, 1, shape=(n_pos, n_features_pos_specific))
+        beta_pos_succ = pm.Deterministic("beta_pos_succ",
+            beta_pos_global_succ + sigma_pos_succ * beta_pos_raw_succ)
 
         sigma_opp_succ = pm.Exponential("sigma_opp_succ", 1.0)
         opp_raw_succ = pm.Normal("opp_raw_succ", 0, 1, shape=n_opp)
@@ -339,8 +384,10 @@ def fit_pooled_model() -> az.InferenceData | None:
         theta_val = pm.Deterministic("theta_val", theta[:, 1])
         pm.Deterministic("rho_theta", theta_corr[0, 1])
 
+        global_contrib = pm.math.dot(X_data_global, beta_global_succ)
+        pos_feat_contrib = pm.math.sum(beta_pos_succ[posid_succ] * X_data_pos_specific, axis=-1)
         logit_p = (alpha_succ +
-                   pm.math.dot(X_data_succ, beta_succ) +
+                   global_contrib + pos_feat_contrib +
                    gamma_pos_succ[posid_succ] +
                    theta_succ[pid_succ] +
                    delta_opp_succ[oid_succ] +
@@ -351,7 +398,8 @@ def fit_pooled_model() -> az.InferenceData | None:
         pm.Bernoulli("y_succ_obs", p=p, observed=y_success)
 
         # --- VALUE RETENTION MODEL (Beta) ---
-        X_data_val = X_val
+        X_data_val_global = X_val_global
+        X_data_val_pos_specific = X_val_pos_specific
         pid_val = player_idx_val
         cid_val = comp_idx_val
         oid_val = opp_idx_val
@@ -359,8 +407,17 @@ def fit_pooled_model() -> az.InferenceData | None:
         posid_val = pos_idx_val
 
         alpha_val = pm.Normal("alpha_val", 0, 1.5)
-        beta_val = pm.Normal("beta_val", 0, 1.0, shape=n_features)
         gamma_pos_val = pm.Normal("gamma_pos_val", 0, 1.0, shape=n_pos)
+
+        # Global (non-position-specific) coefficients
+        beta_global_val = pm.Normal("beta_global_val", 0, 1.0, shape=n_features_global)
+
+        # Position-group-specific coefficients with hierarchical shrinkage
+        beta_pos_global_val = pm.Normal("beta_pos_global_val", 0, 1.0, shape=n_features_pos_specific)
+        sigma_pos_val = pm.HalfNormal("sigma_pos_val", 0.5, shape=n_features_pos_specific)
+        beta_pos_raw_val = pm.Normal("beta_pos_raw_val", 0, 1, shape=(n_pos, n_features_pos_specific))
+        beta_pos_val = pm.Deterministic("beta_pos_val",
+            beta_pos_global_val + sigma_pos_val * beta_pos_raw_val)
 
         sigma_opp_val = pm.Exponential("sigma_opp_val", 1.0)
         opp_raw_val = pm.Normal("opp_raw_val", 0, 1, shape=n_opp)
@@ -374,8 +431,10 @@ def fit_pooled_model() -> az.InferenceData | None:
         team_raw_val = pm.Normal("team_raw_val", 0, 1, shape=n_teams)
         eta_team_val = pm.Deterministic("eta_team_val", team_raw_val * sigma_team_val)
 
+        global_contrib_val = pm.math.dot(X_data_val_global, beta_global_val)
+        pos_feat_contrib_val = pm.math.sum(beta_pos_val[posid_val] * X_data_val_pos_specific, axis=-1)
         logit_mu = (alpha_val +
-                    pm.math.dot(X_data_val, beta_val) +
+                    global_contrib_val + pos_feat_contrib_val +
                     gamma_pos_val[posid_val] +
                     theta_val[pid_val] +
                     delta_opp_val[oid_val] +

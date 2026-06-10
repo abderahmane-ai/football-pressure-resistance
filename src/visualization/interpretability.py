@@ -14,6 +14,7 @@ from scipy.special import expit
 from config import (
     CROSS_VALIDATION_HOLDOUT,
     MODEL_TRACES_DIR,
+    POSITION_SPECIFIC_FEATURES,
     PROCESSED_DATA_DIR,
     SPATIAL_CONFIG,
     TABLES_DIR,
@@ -42,6 +43,21 @@ def run_interpretability_analysis() -> None:
         feature_names = scaler_data['features']
         max_value = scaler_data.get('max_value', 1.0)
 
+    # Recompute masks for global vs. position-specific features
+    scaler_psf = scaler_data.get("position_specific_features", [])
+    def _is_pos_specific(feat: str) -> bool:
+        if feat in scaler_psf:
+            return True
+        for root in scaler_psf:
+            if feat.startswith(f"{root}_spline_"):
+                return True
+        return False
+
+    pos_specific_mask = np.array([_is_pos_specific(f) for f in feature_names])
+    global_mask = ~pos_specific_mask
+    n_pos_specific = int(pos_specific_mask.sum())
+    n_global = int(global_mask.sum())
+
     mapping_path = MODEL_TRACES_DIR / f"pooled_mappings_{holdout}.pkl"
     with open(mapping_path, "rb") as f:
         mappings = pickle.load(f)
@@ -53,24 +69,56 @@ def run_interpretability_analysis() -> None:
     logger.info("=== INTERPRETABILITY ANALYSIS ===")
 
     # ── 1. Feature importance ─────────────────────────────────────────────────
+    # For global features: single coefficient from beta_global.
+    # For position-specific features: mean-across-positions from beta_pos,
+    # plus per-position breakdown saved separately.
     logger.info("1. Feature Importance")
-    beta_succ_summary = az.summary(trace, var_names=['beta_succ'], hdi_prob=0.90)
-    beta_val_summary = az.summary(trace, var_names=['beta_val'], hdi_prob=0.90)
 
-    beta_succ_summary.index = [f + "_ball_security" for f in feature_names]
-    beta_val_summary.index = [f + "_value_retention" for f in feature_names]
+    beta_global_succ = post["beta_global_succ"].values.reshape(-1, n_global)
+    beta_pos_succ = post["beta_pos_succ"].values.reshape(-1, len(pos_mapping), n_pos_specific)
+    beta_global_val = post["beta_global_val"].values.reshape(-1, n_global)
+    beta_pos_val = post["beta_pos_val"].values.reshape(-1, len(pos_mapping), n_pos_specific)
 
-    # pyrefly: ignore [no-matching-overload]
-    beta_summary = pd.concat([beta_succ_summary, beta_val_summary])
+    global_names = [feature_names[i] for i in range(len(feature_names)) if global_mask[i]]
+    pos_names = [feature_names[i] for i in range(len(feature_names)) if pos_specific_mask[i]]
+
+    # Aggregate position-specific β to mean across positions
+    pos_mean_succ = beta_pos_succ.mean(axis=1)  # (n_samples, n_pos_specific)
+    pos_mean_val = beta_pos_val.mean(axis=1)
+
+    # Combine global + mean position-specific for a single feature importance table
+    combined_beta_succ = np.column_stack([beta_global_succ, pos_mean_succ])
+    combined_beta_val = np.column_stack([beta_global_val, pos_mean_val])
+    combined_names = global_names + pos_names
+
+    beta_succ_df = pd.DataFrame({"mean": combined_beta_succ.mean(axis=0)},
+                                index=[f + "_ball_security" for f in combined_names])
+    beta_val_df = pd.DataFrame({"mean": combined_beta_val.mean(axis=0)},
+                               index=[f + "_value_retention" for f in combined_names])
+    beta_summary = pd.concat([beta_succ_df, beta_val_df])
     beta_summary['abs_mean'] = beta_summary['mean'].abs()
     beta_summary = beta_summary.sort_values(by='abs_mean', ascending=False)
 
     TABLES_DIR.mkdir(parents=True, exist_ok=True)
     beta_summary.to_csv(TABLES_DIR / "feature_importance.csv")
 
+    # Per-position feature importance for position-specific features
+    pos_feat_rows = []
+    for p_code, pos_name in pos_mapping.items():
+        for j, f_name in enumerate(pos_names):
+            for model_label, arr in [("ball_security", beta_pos_succ), ("value_retention", beta_pos_val)]:
+                samples = arr[:, p_code, j]
+                pos_feat_rows.append({
+                    "position": pos_name, "feature": f_name, "model": model_label,
+                    "mean": samples.mean(), "hdi_5%": np.percentile(samples, 5),
+                    "hdi_95%": np.percentile(samples, 95),
+                })
+    pd.DataFrame(pos_feat_rows).to_csv(TABLES_DIR / "feature_importance_by_position.csv", index=False)
+
     # ── 2. Variance decomposition ─────────────────────────────────────────────
     # True sample variance of the linear predictor (Xβ) captures multi-collinearity
     # correctly — summing squared βs assumes zero correlation between features.
+    # With position-specific β, the predictor is global_β·X_global + β_pos[p]·X_pos_specific.
     logger.info("2. Variance Decomposition")
 
     df = pd.read_parquet(PROCESSED_DATA_DIR / f"all_pressure_dataset_{holdout}.parquet").dropna()
@@ -82,6 +130,9 @@ def run_interpretability_analysis() -> None:
 
     X = df[feature_names].values
     X_scaled = scaler.transform(X)
+    rev_pos_mapping = {v: k for k, v in pos_mapping.items()}
+    pos_idx = df["position_group"].map(rev_pos_mapping).fillna(rev_pos_mapping.get("Midfielder", 0)).astype(int).values
+
 
     # Ball security model — with correlated θ, extract sigma from packed Cholesky
     # theta_chol is stored as packed lower-triangular: [chol[0,0], chol[1,0], chol[1,1]]
@@ -99,8 +150,15 @@ def run_interpretability_analysis() -> None:
     sigma_team_succ = post['sigma_team_succ'].values.flatten() if 'sigma_team_succ' in post else np.array([0.0])
     var_team_succ = float(np.mean(sigma_team_succ**2))
 
-    beta_succ_samples = post['beta_succ'].values.reshape(-1, len(feature_names))
-    linear_pred_succ = np.dot(X_scaled, beta_succ_samples.T)
+    X_global = X_scaled[:, global_mask]
+    X_pos = X_scaled[:, pos_specific_mask]
+    n_samples_succ = beta_global_succ.shape[0]
+    global_contrib = np.dot(X_global, beta_global_succ.T)  # (n_obs, n_samples)
+    pos_contrib = np.zeros_like(global_contrib)
+    for s in range(n_samples_succ):
+        pos_beta_at_pos = beta_pos_succ[s, pos_idx]  # (n_obs, n_pos_specific)
+        pos_contrib[:, s] = np.sum(pos_beta_at_pos * X_pos, axis=1)
+    linear_pred_succ = global_contrib + pos_contrib
     var_features_succ = float(np.mean(np.var(linear_pred_succ, axis=0)))
 
     total_var_succ = var_theta_succ + var_opp_succ + var_comp_succ + var_team_succ + var_features_succ
@@ -118,8 +176,17 @@ def run_interpretability_analysis() -> None:
     sigma_team_val = post['sigma_team_val'].values.flatten() if 'sigma_team_val' in post else np.array([0.0])
     var_team_val = float(np.mean(sigma_team_val**2))
 
-    beta_val_samples = post['beta_val'].values.reshape(-1, len(feature_names))
-    linear_pred_val = np.dot(X_scaled, beta_val_samples.T)
+    n_samples_val = beta_global_val.shape[0]
+    X_val_mask = df["success"].values.astype(bool)
+    X_global_val = X_global[X_val_mask]
+    X_pos_val = X_pos[X_val_mask]
+    pos_idx_val = pos_idx[X_val_mask]
+    global_contrib_val = np.dot(X_global_val, beta_global_val.T)
+    pos_contrib_val = np.zeros_like(global_contrib_val)
+    for s in range(n_samples_val):
+        pos_beta_at_pos = beta_pos_val[s, pos_idx_val]
+        pos_contrib_val[:, s] = np.sum(pos_beta_at_pos * X_pos_val, axis=1)
+    linear_pred_val = global_contrib_val + pos_contrib_val
     var_features_val = float(np.mean(np.var(linear_pred_val, axis=0)))
 
     total_var_val = var_theta_val + var_opp_val + var_comp_val + var_team_val + var_features_val
@@ -156,12 +223,19 @@ def run_interpretability_analysis() -> None:
 
     mid_pos_code = next((code for code, name in pos_mapping.items() if name == 'Midfielder'), 0)
 
+    def _feat_contrib(vec: np.ndarray, beta_g: np.ndarray, beta_p: np.ndarray, p_code: int) -> np.ndarray:
+        """Feature contribution: global + position-specific for a given position."""
+        return np.dot(beta_g, vec[global_mask]) + np.dot(beta_p[:, p_code], vec[pos_specific_mask])
+
     # ── 2b. Signal-to-Noise Ratio ─────────────────────────────────────────────
     theta_succ_samples = post['theta_succ'].values.reshape(-1, len(mappings['player']))
     y_success_labels = df["success"].values.astype(int)
     logit_succ_mean = (
         alpha_succ_samples[:, np.newaxis]
-        + np.dot(beta_succ_samples, X_scaled.T)
+        + np.column_stack([
+            _feat_contrib(X_scaled[i], beta_global_succ, beta_pos_succ, pos_idx[i])
+            for i in range(len(X_scaled))
+        ])
         + gamma_pos_succ.mean(axis=0)[None, :]
     )
     p_post_mean = expit(logit_succ_mean).mean(axis=0)
@@ -177,14 +251,18 @@ def run_interpretability_analysis() -> None:
     def compute_marginal(feat_idx: int, values_range: np.ndarray) -> pd.DataFrame:
         """Marginalise over all posterior samples at each value of a single feature."""
         results = []
-        # All other features held at their training mean (zero in standardised space)
         scenario_vec = np.zeros(len(feature_names))
         for val in values_range:
-            std_val = (val - scaler.mean_[feat_idx]) / scaler.scale_[feat_idx]
+            if global_mask[feat_idx]:
+                std_val = (val - scaler.mean_[feat_idx]) / scaler.scale_[feat_idx]
+            else:
+                std_val = 0.0  # position-specific features handled below
             scenario_vec[feat_idx] = std_val
 
-            logit_succ = alpha_succ_samples + np.dot(beta_succ_samples, scenario_vec) + gamma_pos_succ[:, mid_pos_code]
-            logit_val = alpha_val_samples + np.dot(beta_val_samples, scenario_vec) + gamma_pos_val[:, mid_pos_code]
+            feat_contrib = _feat_contrib(scenario_vec, beta_global_succ, beta_pos_succ, mid_pos_code)
+            logit_succ = alpha_succ_samples + feat_contrib + gamma_pos_succ[:, mid_pos_code]
+            feat_contrib_val = _feat_contrib(scenario_vec, beta_global_val, beta_pos_val, mid_pos_code)
+            logit_val = alpha_val_samples + feat_contrib_val + gamma_pos_val[:, mid_pos_code]
 
             probs_succ = expit(logit_succ)
             ev_val = expit(logit_val) * max_value
@@ -215,8 +293,12 @@ def run_interpretability_analysis() -> None:
                 vec = np.zeros(len(feature_names))
                 for k in range(bases.shape[1]):
                     vec[feature_names.index(dist_spline_cols[k])] = bases[j, k]
-                logit_succ = alpha_succ_samples + np.dot(beta_succ_samples, vec) + gamma_pos_succ[:, mid_pos_code]
-                logit_val = alpha_val_samples + np.dot(beta_val_samples, vec) + gamma_pos_val[:, mid_pos_code]
+                # Spline columns are position-specific (root = dist_nearest_opp)
+                # so _feat_contrib uses the position-specific beta
+                feat_contrib = _feat_contrib(vec, beta_global_succ, beta_pos_succ, mid_pos_code)
+                logit_succ = alpha_succ_samples + feat_contrib + gamma_pos_succ[:, mid_pos_code]
+                feat_contrib_val = _feat_contrib(vec, beta_global_val, beta_pos_val, mid_pos_code)
+                logit_val = alpha_val_samples + feat_contrib_val + gamma_pos_val[:, mid_pos_code]
                 probs_succ = expit(logit_succ)
                 ev_val = expit(logit_val) * max_value
                 total_ev = probs_succ * ev_val
@@ -280,8 +362,9 @@ def run_interpretability_analysis() -> None:
                 for player in selected_players:
                     p_theta_succ = theta_succ_samples[:, player['idx']]
                     p_theta_val = theta_val_samples[:, player['idx']]
-                    p_pos_succ = gamma_pos_succ[:, player['pos_code']]
-                    p_pos_val = gamma_pos_val[:, player['pos_code']]
+                    pc = player['pos_code']
+                    p_pos_succ = gamma_pos_succ[:, pc]
+                    p_pos_val = gamma_pos_val[:, pc]
 
                     dist_values = dist_grid.reshape(-1, 1)
                     spline_bases = dist_tr.transform(dist_values)
@@ -293,8 +376,10 @@ def run_interpretability_analysis() -> None:
                             col_idx = feature_names.index(col_name)
                             scenario_vec[col_idx] = (spline_bases[j, k] - scaler.mean_[col_idx]) / scaler.scale_[col_idx]
 
-                        logit_succ = alpha_succ_samples + np.dot(beta_succ_samples, scenario_vec) + p_pos_succ + p_theta_succ
-                        logit_val = alpha_val_samples + np.dot(beta_val_samples, scenario_vec) + p_pos_val + p_theta_val
+                        feat_contrib = _feat_contrib(scenario_vec, beta_global_succ, beta_pos_succ, pc)
+                        logit_succ = alpha_succ_samples + feat_contrib + p_pos_succ + p_theta_succ
+                        feat_contrib_val = _feat_contrib(scenario_vec, beta_global_val, beta_pos_val, pc)
+                        logit_val = alpha_val_samples + feat_contrib_val + p_pos_val + p_theta_val
 
                         total_ev = expit(logit_succ) * expit(logit_val) * max_value
 
@@ -316,14 +401,17 @@ def run_interpretability_analysis() -> None:
             for player in selected_players:
                 p_theta_succ = theta_succ_samples[:, player['idx']]
                 p_theta_val = theta_val_samples[:, player['idx']]
-                p_pos_succ = gamma_pos_succ[:, player['pos_code']]
-                p_pos_val = gamma_pos_val[:, player['pos_code']]
+                pc = player['pos_code']
+                p_pos_succ = gamma_pos_succ[:, pc]
+                p_pos_val = gamma_pos_val[:, pc]
                 for dist_val in dist_grid:
                     std_val = (dist_val - scaler.mean_[feat_idx]) / scaler.scale_[feat_idx]
                     scenario_vec = np.zeros(len(feature_names))
                     scenario_vec[feat_idx] = std_val
-                    logit_succ = alpha_succ_samples + np.dot(beta_succ_samples, scenario_vec) + p_pos_succ + p_theta_succ
-                    logit_val = alpha_val_samples + np.dot(beta_val_samples, scenario_vec) + p_pos_val + p_theta_val
+                    feat_contrib = _feat_contrib(scenario_vec, beta_global_succ, beta_pos_succ, pc)
+                    logit_succ = alpha_succ_samples + feat_contrib + p_pos_succ + p_theta_succ
+                    feat_contrib_val = _feat_contrib(scenario_vec, beta_global_val, beta_pos_val, pc)
+                    logit_val = alpha_val_samples + feat_contrib_val + p_pos_val + p_theta_val
                     total_ev = expit(logit_succ) * expit(logit_val) * max_value
                     ice_results.append({
                         'player_name': player['name'],

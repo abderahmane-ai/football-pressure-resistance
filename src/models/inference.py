@@ -15,6 +15,7 @@ from config import (
     CROSS_VALIDATION_HOLDOUT,
     MIN_EVENTS_THRESHOLD,
     MODEL_TRACES_DIR,
+    POSITION_SPECIFIC_FEATURES,
     PROCESSED_DATA_DIR,
     SPATIAL_CONFIG,
     TABLES_DIR,
@@ -83,15 +84,32 @@ def run_posterior_analysis() -> None:
 
     post = trace.posterior  # type: ignore[attr-defined]
 
+    # Recompute masks for global vs. position-specific features
+    scaler_position_specific = scaler_data.get("position_specific_features", [])
+    def _is_pos_specific(feat: str) -> bool:
+        if feat in scaler_position_specific:
+            return True
+        for root in scaler_position_specific:
+            if feat.startswith(f"{root}_spline_"):
+                return True
+        return False
+
+    pos_specific_mask: np.ndarray = np.array([_is_pos_specific(f) for f in feature_names])
+    global_mask: np.ndarray = ~pos_specific_mask
+    n_pos_specific: int = int(pos_specific_mask.sum())
+    n_global: int = int(global_mask.sum())
+
     # Success / Ball Security parameters
     alpha_succ: np.ndarray = post["alpha_succ"].values.flatten()
-    beta_succ: np.ndarray = post["beta_succ"].values.reshape(-1, len(feature_names))
+    beta_global_succ: np.ndarray = post["beta_global_succ"].values.reshape(-1, n_global)
+    beta_pos_succ: np.ndarray = post["beta_pos_succ"].values.reshape(-1, len(pos_mapping), n_pos_specific)
     theta_succ: np.ndarray = post["theta_succ"].values.reshape(-1, len(player_mapping))
     gamma_pos_succ: np.ndarray = post["gamma_pos_succ"].values.reshape(-1, len(pos_mapping))
 
     # Value Parameters
     alpha_val: np.ndarray = post["alpha_val"].values.flatten()
-    beta_val: np.ndarray = post["beta_val"].values.reshape(-1, len(feature_names))
+    beta_global_val: np.ndarray = post["beta_global_val"].values.reshape(-1, n_global)
+    beta_pos_val: np.ndarray = post["beta_pos_val"].values.reshape(-1, len(pos_mapping), n_pos_specific)
     theta_val: np.ndarray = post["theta_val"].values.reshape(-1, len(player_mapping))
     gamma_pos_val: np.ndarray = post["gamma_pos_val"].values.reshape(-1, len(pos_mapping))
 
@@ -150,6 +168,7 @@ def run_posterior_analysis() -> None:
         "CounterPress_Low": {"distance": loose_dist, "angle_nearest_opp": np.pi, "coverage_arc": 0.5, "counter_press": 1},
         "HighPass_Back":    {"distance": tight_dist, "angle_nearest_opp": np.pi, "coverage_arc": 1.5, "pass_height_high": 1},
         "LowPass_Front":    {"distance": loose_dist, "angle_nearest_opp": 0.0, "coverage_arc": 0.5, "pass_height_ground": 1},
+        "Sustained_Press":  {"distance": tight_dist, "angle_nearest_opp": 0.0, "coverage_arc": 2.0, "recent_pressures": 3},
     }
 
     # Scenario feature vectors: unmentioned features are set to their
@@ -168,7 +187,8 @@ def run_posterior_analysis() -> None:
                 continue
             if f_name in feature_names:
                 f_idx = feature_names.index(f_name)
-                if f_name not in ("opps_within_1yd", "opps_within_2yd", "opps_within_4yd", "has_progressive_option", "counter_press"):
+                if f_name not in ("opps_within_1yd", "opps_within_2yd", "opps_within_4yd",
+                                   "has_progressive_option", "counter_press", "recent_pressures"):
                     vec[f_idx] = (val - scaler.mean_[f_idx]) / scaler.scale_[f_idx]
                 else:
                     vec[f_idx] = (0 - scaler.mean_[f_idx]) / scaler.scale_[f_idx]
@@ -181,12 +201,18 @@ def run_posterior_analysis() -> None:
         player_idx: int | None = None,
         p_code: int | None = None,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        pos_effect_succ = gamma_pos_succ[:, p_code] if p_code is not None else gamma_pos_succ[:, mid_pos_code]
-        pos_effect_val = gamma_pos_val[:, p_code] if p_code is not None else gamma_pos_val[:, mid_pos_code]
+        code = p_code if p_code is not None else mid_pos_code
+        pos_effect_succ = gamma_pos_succ[:, code]
+        pos_effect_val = gamma_pos_val[:, code]
 
-        logit_succ = (alpha_succ + np.dot(beta_succ, scenario_vec) + pos_effect_succ
+        scenario_global = scenario_vec[global_mask]
+        scenario_pos = scenario_vec[pos_specific_mask]
+        feat_contrib_succ = np.dot(beta_global_succ, scenario_global) + np.dot(beta_pos_succ[:, code], scenario_pos)
+        feat_contrib_val = np.dot(beta_global_val, scenario_global) + np.dot(beta_pos_val[:, code], scenario_pos)
+
+        logit_succ = (alpha_succ + feat_contrib_succ + pos_effect_succ
                       + mean_opp_succ + mean_comp_succ + mean_team_succ)
-        logit_val = (alpha_val + np.dot(beta_val, scenario_vec) + pos_effect_val
+        logit_val = (alpha_val + feat_contrib_val + pos_effect_val
                      + mean_opp_val + mean_comp_val + mean_team_val)
 
         if player_idx is not None:

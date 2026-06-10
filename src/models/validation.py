@@ -17,6 +17,7 @@ from config import (
     CROSS_VALIDATION_HOLDOUT,
     MIN_EVENTS_THRESHOLD,
     MODEL_TRACES_DIR,
+    POSITION_SPECIFIC_FEATURES,
     PROCESSED_DATA_DIR,
     SPATIAL_CONFIG,
     TABLES_DIR,
@@ -78,15 +79,32 @@ def run_cross_validation() -> None:
     max_value: float = scaler_data["max_value"]
     pos_mapping: dict[int, str] = mappings["position"]
 
+    # Recompute masks for global vs. position-specific features
+    scaler_psf = scaler_data.get("position_specific_features", [])
+    def _is_pos_specific(feat: str) -> bool:
+        if feat in scaler_psf:
+            return True
+        for root in scaler_psf:
+            if feat.startswith(f"{root}_spline_"):
+                return True
+        return False
+
+    pos_specific_mask = np.array([_is_pos_specific(f) for f in feature_names])
+    global_mask = ~pos_specific_mask
+    n_global = int(global_mask.sum())
+    n_pos_specific = int(pos_specific_mask.sum())
+
     post = trace.posterior  # type: ignore[attr-defined]
     # Success params
     alpha_succ: np.ndarray = post["alpha_succ"].values.flatten()
-    beta_succ: np.ndarray = post["beta_succ"].values.reshape(-1, len(feature_names))
+    beta_global_succ: np.ndarray = post["beta_global_succ"].values.reshape(-1, n_global)
+    beta_pos_succ: np.ndarray = post["beta_pos_succ"].values.reshape(-1, len(pos_mapping), n_pos_specific)
     gamma_pos_succ: np.ndarray = post["gamma_pos_succ"].values.reshape(-1, len(pos_mapping))
 
     # Value params
     alpha_val: np.ndarray = post["alpha_val"].values.flatten()
-    beta_val: np.ndarray = post["beta_val"].values.reshape(-1, len(feature_names))
+    beta_global_val: np.ndarray = post["beta_global_val"].values.reshape(-1, n_global)
+    beta_pos_val: np.ndarray = post["beta_pos_val"].values.reshape(-1, len(pos_mapping), n_pos_specific)
     gamma_pos_val: np.ndarray = post["gamma_pos_val"].values.reshape(-1, len(pos_mapping))
 
     # Marginalise opponent/competition effects using the prior mean (zero)
@@ -110,11 +128,28 @@ def run_cross_validation() -> None:
         .values
     )
 
-    # Vectorised linear predictors (opponent/competition effects marginalised to zero)
-    logit_succ_base: np.ndarray = alpha_succ[:, np.newaxis] + np.dot(beta_succ, X_holdout_scaled.T)
-    logit_val_base: np.ndarray = alpha_val[:, np.newaxis] + np.dot(beta_val, X_holdout_scaled.T)
+    # Feature contributions: global + position-specific
+    X_global = X_holdout_scaled[:, global_mask]
+    X_pos = X_holdout_scaled[:, pos_specific_mask]
+    global_contrib_succ = np.dot(beta_global_succ, X_global.T)
+    global_contrib_val = np.dot(beta_global_val, X_global.T)
 
-    # Position effects
+    # Position-specific: broadcast beta_pos over holdout position codes
+    n_samples = beta_global_succ.shape[0]
+    pos_contrib_succ = np.sum(
+        beta_pos_succ[:, holdout_pos_codes, :] * X_pos[np.newaxis, :, :],
+        axis=-1,
+    )
+    pos_contrib_val = np.sum(
+        beta_pos_val[:, holdout_pos_codes, :] * X_pos[np.newaxis, :, :],
+        axis=-1,
+    )
+
+    # Vectorised linear predictors (opponent/competition effects marginalised to zero)
+    logit_succ_base: np.ndarray = alpha_succ[:, np.newaxis] + global_contrib_succ + pos_contrib_succ
+    logit_val_base: np.ndarray = alpha_val[:, np.newaxis] + global_contrib_val + pos_contrib_val
+
+    # Position effects (intercept)
     logit_succ_base += gamma_pos_succ[:, holdout_pos_codes]
     logit_val_base += gamma_pos_val[:, holdout_pos_codes]
 

@@ -60,6 +60,26 @@ MODEL_FEATURE_COLUMNS_BASE = [
     "pass_height_ground",
     "pass_height_low",
     "pass_height_high",
+    "recent_pressures",
+]
+
+# Features that get position-group-specific slopes (hierarchical β_pos[p] ~ N(β, σ)).
+# These are spatial-geometry features whose effect on success/value differs by
+# position — a CB facing coverage_arc=120° experiences it differently than a W.
+POSITION_SPECIFIC_FEATURES = [
+    "dist_nearest_opp",
+    "dist_2nd_nearest_opp",
+    "opps_within_2yd",
+    "opps_within_4yd",
+    "angle_nearest_opp",
+    "coverage_arc",
+    "voronoi_area",
+    "n_free_teammates",
+    "max_free_triangle_area",
+    "dist_nearest_free_teammate",
+    "angle_nearest_free_teammate",
+    "pitch_control",
+    "has_progressive_option",
 ]
 
 # Features that get B-spline expansion (non-linear spatial effects)

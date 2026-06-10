@@ -71,7 +71,7 @@ The ball-carrier's pitch coordinates and distance to the nearest opponent are ma
 Using scikit-learn's `SplineTransformer` with $n_{\text{knots}} = 5$, $\text{degree} = 3$, and `extrapolation="constant"`, each of the three raw features ($bc_x$, $bc_y$, $d_{\text{min}}$) is expanded into **6 B-spline basis columns** ($(n_{\text{knots}} - 1) + \text{degree} - 1$ basis functions with `include_bias=False`). The transformers are fitted on the training split, saved alongside the StandardScaler, and applied identically to the holdout set to prevent data leakage. This yields 18 additional model columns that flexibly capture non-linear pitch geography without requiring the practitioner to hand-engineer interaction terms.
 
 ### 3.7 Match Context Features
-Six non-spatial contextual features are appended to the feature vector from the match event stream:
+Seven non-spatial contextual features are appended to the feature vector from the match event stream:
 
 | Feature | Source | Semantics |
 |---------|---------|-----------|
@@ -79,10 +79,11 @@ Six non-spatial contextual features are appended to the feature vector from the 
 | `minutes_elapsed` | Event `minute` field | Enables the model to learn fatigue and time-pressure effects. |
 | `match_period` | Event `period` field | Accounts for structural differences between match periods, including extra time when present. |
 | `counter_press` | Pressure event `counterpress` flag | Binary indicator whether the pressure was part of an organised counter-press sequence. Counter-pressing events create qualitatively higher cognitive load and time constraints. |
+| `recent_pressures` | Chronological touch history | The number of pressured actions in the player's last 5 carrier events in this match. Acts as a proxy for fatigue and sustained pressure intensity. |
 | `pass_height_ground` | Pass event `pass.height.id == 1` | Binary indicator for ground-level passes (StatsBomb ID 1). |
 | `pass_height_low` / `pass_height_high` | `pass.height.id == 2 / 3` | Binary indicators for low (lofted) and high (aerial) pass trajectories. Pass height strongly mediates the technical execution difficulty under pressure. |
 
-`game_state_diff` is computed by scanning events chronologically and tracking goals via `type == 'Shot'` with `shot_outcome == 'Goal'` and `type == 'Own Goal For'` events. The differential is recorded *before* each event is processed, ensuring no lookahead leakage. The three pass-height columns form a one-hot encoding of the pass height category; non-pass events receive all-zero encodings.
+`game_state_diff` is computed by scanning events chronologically and tracking goals via `type == 'Shot'` with `shot_outcome == 'Goal'` and `type == 'Own Goal For'` events. The differential is recorded *before* each event is processed, ensuring no lookahead leakage. The three pass-height columns form a one-hot encoding of the pass height category; non-pass events receive all-zero encodings. `recent_pressures` is computed by tracking each player's carrier events (`Pass`, `Carry`, `Dribble`) chronologically and counting the number of those events that were pressured within a sliding window of the player's 5 prior touches.
 
 ---
 
@@ -113,15 +114,17 @@ The model strictly separates the prediction space into two sequential hurdles:
    The concentration parameter $\kappa \sim \text{Exponential}(0.1)$ gives a prior mean of 10, appropriate for Beta regression on bounded xT values. A mean of 1 (the default Exponential(1.0)) would force extreme bimodal distributions and cause numerical instability.
 
 ### 5.2 The Linear Predictors
-Both sub-models utilise a parallel hierarchical linear structure linked via the inverse-logit function:
-$$ \text{logit}(p_i) = \alpha_{succ} + X_i \beta_{succ} + \gamma_{pos, succ} + \theta_{player, succ} + \delta_{opp, succ} + \zeta_{comp, succ} + \eta_{team, succ} $$
-$$ \text{logit}(\mu_i) = \alpha_{val} + X_i \beta_{val} + \gamma_{pos, val} + \theta_{player, val} + \delta_{opp, val} + \zeta_{comp, val} + \eta_{team, val} $$
+Both sub-models utilise a parallel hierarchical linear structure linked via the inverse-logit function. To address position-specific spatial sensitivity, features are split into global features $X_{\text{global}}$ (such as match period or fatigue) and position-sensitive spatial features $X_{\text{pos\_spec}}$ (such as coverage arcs and pitch control):
+
+$$ \text{logit}(p_i) = \alpha_{succ} + X_{i, \text{global}} \beta_{\text{global}, succ} + X_{i, \text{pos\_spec}} \beta_{\text{pos}[i], succ} + \gamma_{pos, succ} + \theta_{player, succ} + \delta_{opp, succ} + \zeta_{comp, succ} + \eta_{team, succ} $$
+$$ \text{logit}(\mu_i) = \alpha_{val} + X_{i, \text{global}} \beta_{\text{global}, val} + X_{i, \text{pos\_spec}} \beta_{\text{pos}[i], val} + \gamma_{pos, val} + \theta_{player, val} + \delta_{opp, val} + \zeta_{comp, val} + \eta_{team, val} $$
 
 Where:
 * **$\theta_{player, succ}$:** The player's intrinsic *Ball Security* trait (resistance to being tackled or forcing an error).
 * **$\theta_{player, val}$:** The player's intrinsic *Value Retention* trait (ability to spot and execute dangerous passes despite pressure).
-* $X_i \beta$: The dot product of the standardised feature vector (spatial + contextual + B-spline expansions), establishing the mathematical difficulty of the specific situation.
-* $\gamma_{pos}$: Fixed effect for the player's position group (CB / FB / DM / CM / W / CF) — the replacement-level baseline within their tactical role.
+* $\beta_{\text{global}}$: Global coefficient vector for non-position-specific covariates.
+* $\beta_{\text{pos}[i]}$: Position-group-specific coefficient vector representing how spatial constraints affect difficulty for the carrier's specific role (CB / FB / DM / CM / W / CF).
+* $\gamma_{pos}$: Fixed effect (intercept shift) for the player's position group — the replacement-level baseline within their tactical role.
 * $\delta_{opp}$: Random effect capturing the specific defensive intensity of the opposing team.
 * $\zeta_{comp}$: Random effect capturing the tactical ecosystem and competitive standard of the competition.
 * **$\eta_{team}$:** Random effect for the ball-carrier's own attacking team, capturing systematic offensive style (e.g. high-press, possession-dominant teams generate a different distribution of pressure situations than reactive counter-attacking sides).
@@ -129,6 +132,15 @@ Where:
 ### 5.3 Priors and Non-Centered Parameterisation
 Weakly informative Normal priors are enforced throughout to provide regularisation (shrinkage), preventing the model from overfitting players with small sample sizes (e.g., a player who succeeds in 2 out of 2 duels will be shrunk heavily toward the positional mean).
 
+#### Position-Specific Slopes with Hierarchical Shrinkage
+To share statistical strength across roles while allowing features to exhibit varying effects by position, we apply a hierarchical prior to the position-specific feature coefficients $\beta_{\text{pos}}$:
+$$ \beta_{\text{pos\_global}, f} \sim \mathcal{N}(0, 1.0) $$
+$$ \sigma_{\text{pos}, f} \sim \text{HalfNormal}(0.5) $$
+$$ \beta_{\text{pos\_raw}, j, f} \sim \mathcal{N}(0, 1.0) $$
+$$ \beta_{\text{pos}, j, f} = \beta_{\text{pos\_global}, f} + \sigma_{\text{pos}, f} \times \beta_{\text{pos\_raw}, j, f} $$
+Where $j$ indexes the position group and $f$ indexes the position-specific features. This non-centered parameterisation ensures stable MCMC sampling.
+
+#### Player Random Effects
 All random effects use **non-centered parameterisations** to allow the HMC sampler to navigate the complex funnel geometries that arise in hierarchical models. Rather than sampling $\theta$ directly from $\mathcal{N}(0, \sigma)$, we sample a raw standard normal offset and scale it:
 $$ \tilde{\theta}_{player} \sim \mathcal{N}(0, 1) $$
 $$ \sigma_\theta \sim \text{Exponential}(1.0) $$
@@ -216,4 +228,4 @@ When the VAEP models are available (the default for full training runs), the val
 The `coverage_arc` feature uses a body-width trigonometric projection to estimate how much of the carrier's angular field of view is blocked by opponents. For multi-opponent scenarios, the implementation assumes opponents are non-overlapping angular sources. When opponents are very close together (< 1 yard apart), their individual body-width arcs may overlap, leading to a slight overestimate of coverage. Additionally, the model does not account for opponent height, approach speed, or body orientation, all of which influence the perceived pressure in practice.
 
 ### 8.5 Freeze-Frame Temporal Resolution
-StatsBomb 360 frames capture a single snapshot at the moment of the event. They do not encode player velocities, acceleration vectors, or body orientation. A player sprinting toward the carrier at 8 m/s from 4 yards away exerts substantially more pressure than a stationary player at the same distance, but both produce identical spatial features. Integrating tracking data (where available) to compute velocity-weighted features would substantially improve the model's ability to distinguish true pressure from spatial proximity.
+StatsBomb 360 frames capture a single snapshot at the moment of the event. They do not encode player velocities, acceleration vectors, or body orientation. A player sprinting toward the carrier at 8 m/s from 4 yards away exerts substantially more pressure than a stationary player at the same distance, but both produce identical spatial features. Integrating tracking data (where available) to compute velocity-weighted features would substantially improve the model's ability to distinguish true pressure from spatial proximity. The addition of the `recent_pressures` feature (which tracks the player's prior touch-pressure counts) partially mitigates this limitation by serving as a proxy for sustained pressure intensity, but it does not replace the requirement for high-frequency tracking velocities.

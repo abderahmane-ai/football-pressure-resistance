@@ -10,24 +10,25 @@ from sklearn.preprocessing import StandardScaler
 from config import CROSS_VALIDATION_HOLDOUT
 from src.models import inference
 
-FEATURES = ["dist_nearest_opp", "angle_nearest_opp", "coverage_arc"]
+FEATURES = ["dist_nearest_opp", "angle_nearest_opp", "coverage_arc", "xt_value"]
 
 
 def _posterior_array(values):
     return np.asarray(values, dtype=float).reshape(1, 4)
 
 
-def _build_trace(path):
-    zeros_beta = np.zeros((1, 4, len(FEATURES)))
+def _build_trace(path, n_global=1, n_pos_specific=3, n_pos=1):
     posterior = {
         "alpha_succ": _posterior_array([0, 0, 0, 0]),
-        "beta_succ": zeros_beta,
+        "beta_global_succ": np.zeros((1, 4, n_global)),
+        "beta_pos_succ": np.zeros((1, 4, n_pos, n_pos_specific)),
         "theta_succ": np.array([[[1.0, 0.2], [1.0, 0.2], [1.0, 0.2], [1.0, 0.2]]]),
-        "gamma_pos_succ": np.zeros((1, 4, 1)),
+        "gamma_pos_succ": np.zeros((1, 4, n_pos)),
         "alpha_val": _posterior_array([0, 0, 0, 0]),
-        "beta_val": zeros_beta,
+        "beta_global_val": np.zeros((1, 4, n_global)),
+        "beta_pos_val": np.zeros((1, 4, n_pos, n_pos_specific)),
         "theta_val": np.array([[[0.3, 0.1], [0.3, 0.1], [0.3, 0.1], [0.3, 0.1]]]),
-        "gamma_pos_val": np.zeros((1, 4, 1)),
+        "gamma_pos_val": np.zeros((1, 4, n_pos)),
         "delta_opp_succ": np.zeros((1, 4, 1)),
         "zeta_comp_succ": np.zeros((1, 4, 1)),
         "eta_team_succ": np.zeros((1, 4, 1)),
@@ -57,9 +58,15 @@ def _build_artifacts(tmp_path):
     with open(traces_dir / f"pooled_mappings_{CROSS_VALIDATION_HOLDOUT}.pkl", "wb") as f:
         pickle.dump(mappings, f)
 
+    from config import POSITION_SPECIFIC_FEATURES
+
     scaler = StandardScaler().fit(np.zeros((2, len(FEATURES))))
     with open(traces_dir / f"pooled_scaler_{CROSS_VALIDATION_HOLDOUT}.pkl", "wb") as f:
-        pickle.dump({"scaler": scaler, "features": FEATURES, "max_value": 0.15, "spline_transformers": None}, f)
+        pickle.dump({
+            "scaler": scaler, "features": FEATURES, "max_value": 0.15,
+            "spline_transformers": None,
+            "position_specific_features": list(POSITION_SPECIFIC_FEATURES),
+        }, f)
 
     rows = []
     for player_id, name in [("p1", "High Player"), ("p2", "Low Player")]:
@@ -78,6 +85,7 @@ def _build_artifacts(tmp_path):
             "dist_nearest_opp": 1.0,
             "angle_nearest_opp": 0.0,
             "coverage_arc": 0.5,
+            "xt_value": 0.01,
         }
         rows.append(row)
     pd.DataFrame(rows).to_parquet(
