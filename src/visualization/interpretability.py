@@ -18,7 +18,7 @@ from config import (
     SPATIAL_CONFIG,
     TABLES_DIR,
 )
-from src.features.spatial import expand_spline_features
+from src.features.spatial import expand_spline_features, is_position_specific
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
@@ -45,15 +45,7 @@ def run_interpretability_analysis() -> None:
 
     # Recompute masks for global vs. position-specific features
     scaler_psf = scaler_data.get("position_specific_features", [])
-    def _is_pos_specific(feat: str) -> bool:
-        if feat in scaler_psf:
-            return True
-        for root in scaler_psf:
-            if feat.startswith(f"{root}_spline_"):
-                return True
-        return False
-
-    pos_specific_mask = np.array([_is_pos_specific(f) for f in feature_names])
+    pos_specific_mask = np.array([is_position_specific(f, scaler_psf) for f in feature_names])
     global_mask = ~pos_specific_mask
     n_pos_specific = int(pos_specific_mask.sum())
     n_global = int(global_mask.sum())
@@ -65,6 +57,9 @@ def run_interpretability_analysis() -> None:
         player_mapping = mappings['player']
 
     post = trace.posterior
+
+    # O(1) feature name lookup
+    name_to_idx: dict[str, int] = {name: i for i, name in enumerate(feature_names)}
 
     logger.info("=== INTERPRETABILITY ANALYSIS ===")
 
@@ -292,7 +287,7 @@ def run_interpretability_analysis() -> None:
             for j, val in enumerate(grid):
                 vec = np.zeros(len(feature_names))
                 for k in range(bases.shape[1]):
-                    vec[feature_names.index(dist_spline_cols[k])] = bases[j, k]
+                    vec[name_to_idx[dist_spline_cols[k]]] = bases[j, k]
                 # Spline columns are position-specific (root = dist_nearest_opp)
                 # so _feat_contrib uses the position-specific beta
                 feat_contrib = _feat_contrib(vec, beta_global_succ, beta_pos_succ, mid_pos_code)
@@ -373,7 +368,7 @@ def run_interpretability_analysis() -> None:
                         scenario_vec = np.zeros(len(feature_names))
                         for k in range(spline_bases.shape[1]):
                             col_name = dist_spline_cols[k]
-                            col_idx = feature_names.index(col_name)
+                            col_idx = name_to_idx[col_name]
                             scenario_vec[col_idx] = (spline_bases[j, k] - scaler.mean_[col_idx]) / scaler.scale_[col_idx]
 
                         feat_contrib = _feat_contrib(scenario_vec, beta_global_succ, beta_pos_succ, pc)

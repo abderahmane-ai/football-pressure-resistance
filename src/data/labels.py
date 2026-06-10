@@ -29,8 +29,7 @@ def define_success(
         events = events.sort_values(by=["match_id", "timestamp"])
 
     events = events.reset_index(drop=True)
-    # pyrefly: ignore [bad-assignment]
-    event_idx_map: dict[str, int] = {row["id"]: idx for idx, row in events.iterrows()}
+    event_idx_map: dict[str, int] = dict(zip(events["id"].values, range(len(events))))
 
     labeled_results: list[dict[str, Any]] = []
 

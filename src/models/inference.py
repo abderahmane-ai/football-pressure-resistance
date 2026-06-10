@@ -20,7 +20,7 @@ from config import (
     TABLES_DIR,
 )
 from src.data.validation import validate_model_dataset
-from src.features.spatial import expand_spline_features
+from src.features.spatial import expand_spline_features, is_position_specific
 
 logger = logging.getLogger(__name__)
 
@@ -86,15 +86,7 @@ def run_posterior_analysis() -> None:
 
     # Recompute masks for global vs. position-specific features
     scaler_position_specific = scaler_data.get("position_specific_features", [])
-    def _is_pos_specific(feat: str) -> bool:
-        if feat in scaler_position_specific:
-            return True
-        for root in scaler_position_specific:
-            if feat.startswith(f"{root}_spline_"):
-                return True
-        return False
-
-    pos_specific_mask: np.ndarray = np.array([_is_pos_specific(f) for f in feature_names])
+    pos_specific_mask: np.ndarray = np.array([is_position_specific(f, scaler_position_specific) for f in feature_names])
     global_mask: np.ndarray = ~pos_specific_mask
     n_pos_specific: int = int(pos_specific_mask.sum())
     n_global: int = int(global_mask.sum())
@@ -143,6 +135,9 @@ def run_posterior_analysis() -> None:
     tight_dist: float = SPATIAL_CONFIG["tight_pressure_radius"] * 0.3
     loose_dist: float = SPATIAL_CONFIG["tight_pressure_radius"] * 0.6
 
+    # O(1) feature name lookup
+    name_to_idx: dict[str, int] = {name: i for i, name in enumerate(feature_names)}
+
     # Pre-compute spline basis for distance scenarios
     dist_spline_cols = [c for c in feature_names if c.startswith('dist_nearest_opp_spline_')]
     dist_scenario_vecs: dict[str, np.ndarray] = {}
@@ -153,7 +148,7 @@ def run_posterior_analysis() -> None:
                 basis = dist_tr.transform([[dist_val]])[0]
                 vec = np.zeros(len(feature_names))
                 for k, col_name in enumerate(dist_spline_cols):
-                    f_idx = feature_names.index(col_name)
+                    f_idx = name_to_idx[col_name]
                     vec[f_idx] = (basis[k] - scaler.mean_[f_idx]) / scaler.scale_[f_idx]
                 dist_scenario_vecs[label] = vec
 
@@ -185,8 +180,8 @@ def run_posterior_analysis() -> None:
         for f_name, val in s.items():
             if f_name == "distance":
                 continue
-            if f_name in feature_names:
-                f_idx = feature_names.index(f_name)
+            if f_name in name_to_idx:
+                f_idx = name_to_idx[f_name]
                 if f_name not in ("opps_within_1yd", "opps_within_2yd", "opps_within_4yd",
                                    "has_progressive_option", "counter_press", "recent_pressures"):
                     vec[f_idx] = (val - scaler.mean_[f_idx]) / scaler.scale_[f_idx]

@@ -22,7 +22,7 @@ from config import (
     TABLES_DIR,
 )
 from src.data.validation import validate_model_dataset
-from src.features.spatial import expand_spline_features
+from src.features.spatial import expand_spline_features, is_position_specific
 
 logger = logging.getLogger(__name__)
 
@@ -81,15 +81,7 @@ def run_cross_validation() -> None:
 
     # Recompute masks for global vs. position-specific features
     scaler_psf = scaler_data.get("position_specific_features", [])
-    def _is_pos_specific(feat: str) -> bool:
-        if feat in scaler_psf:
-            return True
-        for root in scaler_psf:
-            if feat.startswith(f"{root}_spline_"):
-                return True
-        return False
-
-    pos_specific_mask = np.array([_is_pos_specific(f) for f in feature_names])
+    pos_specific_mask = np.array([is_position_specific(f, scaler_psf) for f in feature_names])
     global_mask = ~pos_specific_mask
     n_global = int(global_mask.sum())
     n_pos_specific = int(pos_specific_mask.sum())

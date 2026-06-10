@@ -31,6 +31,8 @@ except ImportError:
 
 _VAEP_MODEL_DIR: Path = Path(cast(str, VAEP_CONFIG["model_dir"]))
 
+_VAEP_MODELS: tuple[Any, Any] | None = None
+
 
 def _is_valid_loc(loc: Any) -> bool:
     if loc is not None and hasattr(loc, "__len__") and len(loc) >= 2:
@@ -48,37 +50,47 @@ def _extract_state_features(events: pd.DataFrame) -> pd.DataFrame:
     - is_pass, is_dribble, is_shot, is_carry, is_duel (binary)
     - pass_ground, pass_low, pass_high (one-hot)
     """
-    rows: list[dict[str, float]] = []
     pitch_len = SPATIAL_CONFIG["pitch_length"]
     pitch_width = SPATIAL_CONFIG["pitch_width"]
     goal_x = SPATIAL_CONFIG["goal_x"]
     goal_y = SPATIAL_CONFIG["goal_y"]
 
-    for _, ev in events.iterrows():
-        loc = ev.get("location")
+    locs = events["location"].values
+    ev_types = events["type"].values
+    under_pressure_col = events.get("under_pressure", pd.Series([False] * len(events))).values
+    goal_diff_col = events.get("goal_diff", pd.Series([0.0] * len(events))).values
+    pass_infos = events.get("pass", [None] * len(events))
+    pass_infos = pass_infos.values if isinstance(pass_infos, pd.Series) else pass_infos
+
+    rows: list[dict[str, float]] = []
+    n = len(events)
+
+    for i in range(n):
+        loc = locs[i]
         if not _is_valid_loc(loc):
-            rows.append({})  # will be filtered later
+            rows.append({})
             continue
 
         x, y = float(loc[0]), float(loc[1])
         dist_to_goal = float(np.sqrt((x - goal_x) ** 2 + (y - goal_y) ** 2))
         angle_to_goal = float(np.arctan2(goal_y - y, goal_x - x))
 
-        ev_type = ev.get("type", "")
-        pass_info = ev.get("pass")
+        ev_type = ev_types[i] if not pd.isna(ev_types[i]) else ""
         ph_id = 0
-        if ev_type == "Pass" and isinstance(pass_info, dict):
-            height_info = pass_info.get("height")
-            if isinstance(height_info, dict):
-                ph_id = int(height_info.get("id", 0))
+        if ev_type == "Pass":
+            pass_info = pass_infos[i]
+            if isinstance(pass_info, dict):
+                height_info = pass_info.get("height")
+                if isinstance(height_info, dict):
+                    ph_id = int(height_info.get("id", 0))
 
         rows.append({
             "loc_x": x / pitch_len,
             "loc_y": y / pitch_width,
             "dist_to_goal": dist_to_goal,
             "angle_to_goal": angle_to_goal,
-            "goal_diff": float(ev.get("goal_diff", 0)),
-            "under_pressure": 1.0 if ev.get("under_pressure") else 0.0,
+            "goal_diff": float(goal_diff_col[i]),
+            "under_pressure": 1.0 if under_pressure_col[i] else 0.0,
             "is_pass": 1.0 if ev_type == "Pass" else 0.0,
             "is_dribble": 1.0 if ev_type == "Dribble" else 0.0,
             "is_shot": 1.0 if ev_type == "Shot" else 0.0,
@@ -90,8 +102,7 @@ def _extract_state_features(events: pd.DataFrame) -> pd.DataFrame:
             "_has_location": 1.0,
         })
 
-    result = pd.DataFrame(rows)
-    return result
+    return pd.DataFrame(rows)
 
 
 def _compute_labels(
@@ -219,7 +230,14 @@ def train_vaep_models(events: pd.DataFrame) -> tuple[Any, Any]:
 
 
 def load_vaep_models() -> tuple[Any, Any] | None:
-    """Load pre-trained VAEP models from disk. Returns None if not found."""
+    """Load pre-trained VAEP models from disk. Returns None if not found.
+
+    Models are cached at module level after first load to avoid repeated
+    ``joblib.load`` deserialisation (called once per match during data building).
+    """
+    global _VAEP_MODELS
+    if _VAEP_MODELS is not None:
+        return _VAEP_MODELS
     if not _HAS_ML_LIBS or joblib is None:
         return None
     score_path = _VAEP_MODEL_DIR / "vaep_score.pkl"
@@ -232,7 +250,8 @@ def load_vaep_models() -> tuple[Any, Any] | None:
         return None
     score_model = joblib.load(score_path)
     concede_model = joblib.load(concede_path)
-    return score_model, concede_model
+    _VAEP_MODELS = (score_model, concede_model)
+    return _VAEP_MODELS
 
 
 def compute_vaep(events: pd.DataFrame) -> np.ndarray | None:

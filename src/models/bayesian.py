@@ -23,7 +23,11 @@ from config import (
     PROCESSED_DATA_DIR,
 )
 from src.data.validation import DataValidationError, validate_model_dataset
-from src.features.spatial import expand_spline_features, fit_spline_transformers
+from src.features.spatial import (
+    expand_spline_features,
+    fit_spline_transformers,
+    is_position_specific,
+)
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
@@ -124,18 +128,8 @@ def _save_scaler(
 
 
 def _is_position_specific(feature_name: str) -> bool:
-    """Check whether *feature_name* should have position-group-specific slopes.
-
-    A feature is position-specific if its (or its B-spline root's) name appears
-    in ``POSITION_SPECIFIC_FEATURES``.  Spline columns like ``dist_nearest_opp_spline_3``
-    inherit the position-specific flag from their root feature.
-    """
-    if feature_name in POSITION_SPECIFIC_FEATURES:
-        return True
-    for root in POSITION_SPECIFIC_FEATURES:
-        if feature_name.startswith(f"{root}_spline_"):
-            return True
-    return False
+    """Check whether *feature_name* should have position-group-specific slopes."""
+    return is_position_specific(feature_name, list(POSITION_SPECIFIC_FEATURES))
 
 
 def _save_mappings(

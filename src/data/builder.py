@@ -92,19 +92,20 @@ def build_all_datasets(include_holdout: bool = False) -> pd.DataFrame | None:
             for fut in tqdm(futures, desc=f"Loading lineups ({comp_name})"):
                 lineups_by_match[futures[fut]] = fut.result()
 
-        # Derive GK IDs and position groups from the single lineups fetch
+        # Pre-group events by match_id to avoid re-filtering the full DataFrame
+        match_groups: dict[int, pd.DataFrame] = dict(events_df.groupby("match_id"))
+
         gk_ids_by_match: dict[int, set[int]] = {}
         pos_groups_by_match: dict[int, dict[int, str]] = {}
         for mid in match_ids:
             lineups = lineups_by_match.get(mid, {})
             gk_ids_by_match[mid] = get_goalkeeper_ids_from_lineups(lineups)
-            match_ev = events_df[events_df["match_id"] == mid]
+            match_ev = match_groups.get(mid, events_df.iloc[:0])
             pos_groups_by_match[mid] = get_player_position_groups_from_lineups(lineups, match_ev)
 
-        # Build args list, skipping matches with no 360 data
         worker_args = [
             (mid,
-             events_df[events_df["match_id"] == mid].copy().reset_index(drop=True),
+             match_groups[mid].copy().reset_index(drop=True),
              frames_dict[mid],
              gk_ids_by_match.get(mid, set()),
              pos_groups_by_match.get(mid, {}),
@@ -183,17 +184,19 @@ def build_holdout_dataset() -> None:
             for fut in tqdm(futures, desc="Loading holdout lineups"):
                 lineups_by_match[futures[fut]] = fut.result()
 
+        match_groups: dict[int, pd.DataFrame] = dict(events_df.groupby("match_id"))
+
         gk_ids_by_match: dict[int, set[int]] = {}
         pos_groups_by_match: dict[int, dict[int, str]] = {}
         for mid in match_ids:
             lineups = lineups_by_match.get(mid, {})
             gk_ids_by_match[mid] = get_goalkeeper_ids_from_lineups(lineups)
-            match_ev = events_df[events_df["match_id"] == mid]
+            match_ev = match_groups.get(mid, events_df.iloc[:0])
             pos_groups_by_match[mid] = get_player_position_groups_from_lineups(lineups, match_ev)
 
         worker_args = [
             (mid,
-             events_df[events_df["match_id"] == mid].copy().reset_index(drop=True),
+             match_groups[mid].copy().reset_index(drop=True),
              frames_dict[mid],
              gk_ids_by_match.get(mid, set()),
              pos_groups_by_match.get(mid, {}),

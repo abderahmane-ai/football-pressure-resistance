@@ -12,6 +12,9 @@ Designed to be run once per data refresh, before the main PRS pipeline.
 from __future__ import annotations
 
 import logging
+import os
+import sys
+from pathlib import Path
 
 import pandas as pd
 
@@ -28,6 +31,17 @@ logger = logging.getLogger(__name__)
 
 def main() -> None:
     logger.info("=== VAEP Model Training ===")
+
+    # Skip if models already exist (VAEP is invariant to CV holdout)
+    model_dir = Path(VAEP_CONFIG["model_dir"])  # type: ignore[arg-type]
+    if (model_dir / "vaep_score.pkl").exists() and (model_dir / "vaep_concede.pkl").exists():
+        if os.environ.get("FORCE_RETRAIN", "") != "1":
+            logger.info(
+                "VAEP models already exist at %s. Skipping (set FORCE_RETRAIN=1 to override).",
+                model_dir,
+            )
+            return
+
     logger.info("Loading all competition events...")
     all_comp_data = load_all_competitions(list(COMPETITIONS.keys()))
 
@@ -44,7 +58,7 @@ def main() -> None:
     combined = pd.concat(all_events, ignore_index=True)
     logger.info("Combined dataset: %d events", len(combined))
 
-    score_model, concede_model = train_vaep_models(combined)
+    train_vaep_models(combined)
     logger.info("VAEP training complete.")
     logger.info("Models saved to: %s", VAEP_CONFIG["model_dir"])
 

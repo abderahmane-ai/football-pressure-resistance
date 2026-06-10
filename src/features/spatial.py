@@ -1,6 +1,7 @@
 """Extract spatial features from a single StatsBomb 360 freeze frame."""
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
@@ -191,6 +192,23 @@ def extract_spatial_features_from_frame(
     return features
 
 
+# ── Position-specific feature detection ───────────────────────────────────────
+# Shared utility used by bayesian.py, inference.py, validation.py, and
+# interpretability.py to avoid code duplication.
+
+def is_position_specific(feature_name: str, root_features: Sequence[str]) -> bool:
+    """Check whether *feature_name* should have position-group-specific slopes.
+    A feature is position-specific if its name (or its B-spline root's name)
+    appears in *root_features*.
+    """
+    if feature_name in root_features:
+        return True
+    for root in root_features:
+        if feature_name.startswith(f"{root}_spline_"):
+            return True
+    return False
+
+
 # ── B-spline expansion ────────────────────────────────────────────────────────
 
 def fit_spline_transformers(
@@ -231,15 +249,17 @@ def expand_spline_features(
     values.  Returns a new DataFrame with spline columns appended.
     """
     result = df.copy()
+    cols_to_drop = [feat for feat in transformers if feat in result.columns]
+    if cols_to_drop:
+        result = result.drop(columns=cols_to_drop)
     for feat, transformer in transformers.items():
-        if feat not in result.columns:
+        if feat not in df.columns:
             continue
-        values = result[feat].values.reshape(-1, 1)
+        values = df[feat].values.reshape(-1, 1)
         valid_mask = ~np.isnan(values.flatten())
         basis = np.full((len(values), transformer.n_features_out_), np.nan)
         if valid_mask.sum() > 0:
             basis[valid_mask] = transformer.transform(values[valid_mask])
-        result = result.drop(columns=[feat])
         for i in range(transformer.n_features_out_):
             result[f"{feat}_spline_{i}"] = basis[:, i]
     return result
