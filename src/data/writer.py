@@ -14,7 +14,7 @@ from config import MODEL_FEATURE_COLUMNS
 def _dataframe_hash(df: pd.DataFrame) -> str:
     """Compute a stable SHA-256 digest of a DataFrame's content for provenance tracking.
 
-    Note: only hashes head/tail samples + column names + shape.  Two DataFrames
+    Only hashes head/tail samples + column names + shape.  Two DataFrames
     that differ only in the middle can produce the same hash.  This is
     intentionally fast (not cryptographically exhaustive) — it exists for
     provenance logging, not correctness assertions.

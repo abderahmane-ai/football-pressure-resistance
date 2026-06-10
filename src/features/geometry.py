@@ -87,7 +87,7 @@ def pitch_control_value(
 
     Returns value in [-1, 1] representing net control (positive = teammate dominance).
 
-    Note: callers must ensure the ball-carrier is excluded from ``teammates``
+    Callers must ensure the ball-carrier is excluded from ``teammates``
     to avoid a self-influence bias (distance=0 → maximum Gaussian weight).
     """
     bc_arr = np.asarray(bc, dtype=float)

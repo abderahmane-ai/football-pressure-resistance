@@ -200,7 +200,7 @@ def run_interpretability_analysis() -> None:
 
     # Grid capped at tight_pressure_radius; extrapolating beyond is
     # out-of-distribution because the builder filters to ≤ 5 yards.
-    # Note: dist_nearest_opp is replaced by spline columns; marginal effects
+    # Dist_nearest_opp is replaced by spline columns; marginal effects
     # for distance are computed via the spline basis if available,
     # otherwise fall back to the raw feature. coverage_arc is a base feature.
     dist_spline_cols = [c for c in feature_names if c.startswith('dist_nearest_opp_spline_')]

@@ -165,7 +165,7 @@ def validate_model_dataset(
             f"{context}: {n_null_vp} null value_preserved value(s). "
             "compute_intended_xt() may have returned None for some events."
         )
-    # Note: VAEP can be negative (actions that increase conceding risk),
+    # VAEP can be negative (actions that increase conceding risk),
     # so negative value_preserved is valid when VAEP is active.
 
     numeric_columns = list(feature_columns) + ["value_preserved"]

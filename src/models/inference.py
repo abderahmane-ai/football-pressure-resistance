@@ -41,7 +41,7 @@ def run_posterior_analysis() -> None:
     Generate player leaderboards with Ball Security and Value Retention scores.
     Uses expit for numeric stability and appropriately handles the Hurdle model outputs.
 
-    Design note — PRS aggregation:
+    PRS aggregation details:
     PRS = θ_succ + θ_val (additive on the logit scale). This gives equal
     weight to ball security and value retention. Both θ terms live on the
     logit scale with the same prior (Non-centered Normal), so addition is

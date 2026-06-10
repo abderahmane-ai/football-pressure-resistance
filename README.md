@@ -4,7 +4,7 @@ A research-grade Bayesian hierarchical framework for measuring football player c
 
 ## Overview
 
-Traditional metrics evaluate passes under pressure but fail to account for spatial context (distance to opponents, angular coverage, passing lane geometry). The **Pressure Resistance Score (PRS) v2** uses a **Hierarchical Beta Hurdle Model** to simultaneously evaluate *Ball Security* (possession retention) and *Value Retention* (Expected Value preserved) during tight-pressure duels. Player scores are adjusted for opponent quality, team style, competition context, and fine-grained positional roles.
+Traditional metrics evaluate passes under pressure but fail to account for spatial context (distance to opponents, angular coverage, passing lane geometry). The **Pressure Resistance Score (PRS)** uses a **Hierarchical Beta Hurdle Model** to simultaneously evaluate *Ball Security* (possession retention) and *Value Retention* (Expected Value preserved) during tight-pressure duels. Player scores are adjusted for opponent quality, team style, competition context, and fine-grained positional roles.
 
 ### Key Design Decisions
 
