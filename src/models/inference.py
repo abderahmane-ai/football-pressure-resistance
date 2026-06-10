@@ -74,8 +74,7 @@ def run_posterior_analysis() -> None:
     validate_model_dataset(df, feature_names, context="posterior analysis dataset")
     event_counts: dict[Any, int] = df["player_id"].value_counts().to_dict()
 
-    # pyrefly: ignore [missing-attribute]
-    post = trace.posterior
+    post = trace.posterior  # type: ignore[attr-defined]
 
     # Success / Ball Security parameters
     alpha_succ: np.ndarray = post["alpha_succ"].values.flatten()

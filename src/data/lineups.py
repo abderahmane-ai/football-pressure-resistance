@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 def _fetch_lineups(match_id: int) -> dict[str, pd.DataFrame]:
     """Fetch lineups for a match, returning an empty dict on failure."""
     try:
-        return sb.lineups(match_id=match_id)
+        return sb.lineups(match_id=match_id)  # type: ignore[no-any-return]
     except Exception as e:
         logger.debug("Could not load lineups for match %d: %s", match_id, e)
         return {}

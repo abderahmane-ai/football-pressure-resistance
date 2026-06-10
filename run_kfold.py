@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 COMPS = ["Euro_2020", "Euro_2024", "World_Cup_2022", "Bundesliga_2024"]
 
 
-def get_python_cmd():
+def get_python_cmd() -> str:
     """
     Resolve Python launcher in a cross-platform-safe way.
     - Prefer the current interpreter (`sys.executable`) when available.
@@ -24,7 +24,7 @@ def get_python_cmd():
         return sys.executable
     return "python" if os.name == "nt" else "python3"
 
-def check_optimization():
+def check_optimization() -> None:
     """Warn if JAX/NumPyro is unavailable; fall back to PyMC default sampler."""
     if find_spec("numpyro") and find_spec("jax"):
         logger.info("JAX/NumPyro available — MCMC will be hardware-accelerated.")
@@ -42,7 +42,7 @@ def run_step(step_cmd: list[str], env: dict[str, str]) -> None:
         logger.error(f"Step {' '.join(step_cmd)} failed with return code {process.returncode}")
         sys.exit(1)
 
-def main():
+def main() -> None:
     logger.info("Starting 4-Fold Cross Validation Pipeline")
     check_optimization()
     python_cmd = get_python_cmd()

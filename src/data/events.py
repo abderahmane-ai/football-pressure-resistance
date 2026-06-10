@@ -76,6 +76,7 @@ def compute_intended_xt(
     item: dict[str, Any],
     match_events: pd.DataFrame,
     id_to_idx: dict[str, int] | None = None,
+    match_events_list: list[dict[str, Any]] | None = None,
 ) -> float | None:
     """
     Compute the intended expected threat (xT) of the action, regardless of success.
@@ -83,11 +84,14 @@ def compute_intended_xt(
     """
     bc_event_id: str = item["ball_carrier_event_id"]
 
-    if id_to_idx is not None:
+    if id_to_idx is not None and (match_events_list is not None or not match_events.empty):
         bc_idx = id_to_idx.get(bc_event_id)
         if bc_idx is None:
             return None
-        bc_event = match_events.iloc[bc_idx]
+        if match_events_list is not None:
+            bc_event = match_events_list[bc_idx]
+        else:
+            bc_event = match_events.iloc[bc_idx]
     else:
         bc_event_rows = match_events[match_events["id"] == bc_event_id]
         if bc_event_rows.empty:
@@ -99,7 +103,10 @@ def compute_intended_xt(
     if not _is_valid_loc(bc_loc):
         # Impute from previous event
         if bc_idx > 0:
-            prev_event = match_events.iloc[bc_idx - 1]
+            if match_events_list is not None:
+                prev_event = match_events_list[bc_idx - 1]
+            else:
+                prev_event = match_events.iloc[bc_idx - 1]
             end_loc = prev_event.get("end_location")
             prev_loc = prev_event.get("location")
             if _is_valid_loc(end_loc):
@@ -111,36 +118,47 @@ def compute_intended_xt(
         else:
             return None
 
-    # pyrefly: ignore [unsupported-operation]
-    next_xt: float = xt_value(bc_loc[0], bc_loc[1])
+    bc_loc_seq: Any = bc_loc
+    next_xt: float = xt_value(bc_loc_seq[0], bc_loc_seq[1])
 
-    if bc_event["type"] == "Pass":
+    bc_event_type = bc_event.get("type")
+
+    if bc_event_type == "Pass":
         end_loc = bc_event.get("pass_end_location")
         if _is_valid_loc(end_loc):
-            # pyrefly: ignore [unsupported-operation]
-            next_xt = xt_value(end_loc[0], end_loc[1])
-    elif bc_event["type"] == "Carry":
+            end_loc_seq_pass: Any = end_loc
+            next_xt = xt_value(end_loc_seq_pass[0], end_loc_seq_pass[1])
+    elif bc_event_type == "Carry":
         end_loc = bc_event.get("carry_end_location")
         if _is_valid_loc(end_loc):
-            # pyrefly: ignore [unsupported-operation]
-            next_xt = xt_value(end_loc[0], end_loc[1])
-    elif bc_event["type"] == "Dribble":
-        if bc_idx + 1 < len(match_events):
-            next_loc = match_events.iloc[bc_idx + 1].get("location")
+            end_loc_seq_carry: Any = end_loc
+            next_xt = xt_value(end_loc_seq_carry[0], end_loc_seq_carry[1])
+    elif bc_event_type == "Dribble":
+        length = len(match_events_list) if match_events_list is not None else len(match_events)
+        if bc_idx + 1 < length:
+            if match_events_list is not None:
+                next_loc = match_events_list[bc_idx + 1].get("location")
+            else:
+                next_loc = match_events.iloc[bc_idx + 1].get("location")
             if _is_valid_loc(next_loc):
-                # pyrefly: ignore [unsupported-operation]
-                next_xt = xt_value(next_loc[0], next_loc[1])
-    elif bc_idx + 1 < len(match_events):
-        next_loc = match_events.iloc[bc_idx + 1].get("location")
-        if _is_valid_loc(next_loc):
-            # pyrefly: ignore [unsupported-operation]
-            next_xt = xt_value(next_loc[0], next_loc[1])
+                next_loc_seq_dribble: Any = next_loc
+                next_xt = xt_value(next_loc_seq_dribble[0], next_loc_seq_dribble[1])
+    else:
+        length = len(match_events_list) if match_events_list is not None else len(match_events)
+        if bc_idx + 1 < length:
+            if match_events_list is not None:
+                next_loc = match_events_list[bc_idx + 1].get("location")
+            else:
+                next_loc = match_events.iloc[bc_idx + 1].get("location")
+            if _is_valid_loc(next_loc):
+                next_loc_seq_else: Any = next_loc
+                next_xt = xt_value(next_loc_seq_else[0], next_loc_seq_else[1])
 
     return float(next_xt)
 
 
 def _process_single_match(
-    args: tuple[int, pd.DataFrame, pd.DataFrame, set[int], dict[int, str], str],
+    args: tuple[int, pd.DataFrame, pd.DataFrame, set[int], dict[Any, str], str],
 ) -> list[dict[str, Any]]:
     """
     Module-level worker for parallel match processing.
@@ -159,13 +177,16 @@ def _process_single_match(
         labeled_events = define_success(match_events, paired_events)
         logger.debug("Match %d: labeled_events=%d", match_id, len(labeled_events))
 
+        # Convert DataFrame to list of dict records once per match for fast C-level loop lookups
+        match_events_list = match_events.to_dict(orient="records")
+
         # Build O(1) event lookup (dict of dicts)
         event_lookup: dict[str, dict[str, Any]] = {}
         if "id" in match_events.columns:
             event_lookup = match_events.set_index("id").to_dict(orient="index")
 
         # Build O(1) event index lookup
-        id_to_idx = {eid: idx for idx, eid in enumerate(match_events["id"]) if isinstance(eid, str)}
+        id_to_idx: dict[str, int] = {eid: idx for idx, eid in enumerate(match_events["id"]) if isinstance(eid, str)}
 
         # Precompute player name lookup once per match
         player_name_lookup: dict[int, str] = {}
@@ -184,7 +205,7 @@ def _process_single_match(
 
         for item in labeled_events:
             player_id = item.get("player_id")
-            if player_id in gk_ids:
+            if player_id is None or player_id in gk_ids:
                 continue
 
             ev = event_lookup.get(item["ball_carrier_event_id"])
@@ -210,7 +231,7 @@ def _process_single_match(
                 continue
             n_dist_ok += 1
 
-            intended_xt = compute_intended_xt(item, match_events, id_to_idx=id_to_idx)
+            intended_xt = compute_intended_xt(item, match_events, id_to_idx=id_to_idx, match_events_list=match_events_list)
             if intended_xt is None:
                 continue
             n_xt_ok += 1

@@ -1,5 +1,6 @@
 """Data loading, pressure pairing, labeling, and validation helpers."""
 
+from src.data.builder import build_all_datasets, build_holdout_dataset
 from src.data.labels import define_success
 from src.data.pairing import (
     BALL_CARRIER_EVENT_TYPES,
@@ -22,4 +23,6 @@ __all__ = [
     "validate_model_dataset",
     "validate_statsbomb_events",
     "validate_statsbomb_frames",
+    "build_all_datasets",
+    "build_holdout_dataset",
 ]

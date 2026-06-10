@@ -92,7 +92,7 @@ def _load_cached_scaler(path: Path) -> dict[str, Any] | None:
                 "refitting scaler."
             )
             return None
-        return data
+        return data  # type: ignore[no-any-return]
     except Exception as exc:
         logger.warning("Could not load cached scaler from %s: %s", path, exc)
         return None
@@ -189,7 +189,7 @@ def fit_pooled_model() -> az.InferenceData | None:
             "Found existing trace at %s. Skipping MCMC (set FORCE_RETRAIN=1 to override).",
             trace_path,
         )
-        return az.from_netcdf(str(trace_path))
+        return az.from_netcdf(str(trace_path))  # type: ignore[no-any-return]
 
     dataset_path: Path = PROCESSED_DATA_DIR / f"all_pressure_dataset_{holdout}.parquet"
     if not dataset_path.exists():
@@ -273,7 +273,7 @@ def fit_pooled_model() -> az.InferenceData | None:
     opp_idx_val: np.ndarray = opp_idx[mask]
     pos_idx_val: np.ndarray = pos_idx[mask]
 
-    with pm.Model():  # type: ignore[attr-defined]
+    with pm.Model():
         # --- BALL SECURITY MODEL (Logistic) ---
         # Data is passed directly as numpy arrays (becomes TensorConstant in the
         # graph) instead of via pm.Data (TensorSharedVariable). This is faster
@@ -382,7 +382,7 @@ def fit_pooled_model() -> az.InferenceData | None:
     trace.to_netcdf(str(trace_path))
     logger.info("Saved trace to %s", trace_path)
 
-    return trace
+    return trace  # type: ignore[no-any-return]
 
 
 if __name__ == "__main__":

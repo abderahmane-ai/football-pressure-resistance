@@ -87,27 +87,23 @@ def pair_pressure_with_ball_carrier(
     pressure_events = events[events["type"] == "Pressure"]
 
     # O(1) event lookup via dict — avoids iterrows over the full DataFrame
-    events_lookup: dict[str, pd.Series] = {}
+    events_lookup: dict[str, dict[str, Any]] = {}
     if "id" in events.columns:
-        events_indexed = events.set_index("id", drop=False)
-        for event_id, row in events_indexed.iterrows():
-            if isinstance(event_id, str):
-                events_lookup[event_id] = row
+        events_lookup = events.set_index("id").to_dict(orient="index")
 
     # O(1) frame lookup by event_uuid
     frames_lookup: dict[str, dict[str, Any]] = {}
     if isinstance(frames_dict, pd.DataFrame) and not frames_dict.empty and "event_uuid" in frames_dict.columns:
-        for event_uuid, row in frames_dict.set_index("event_uuid", drop=False).iterrows():
-            frames_lookup[str(event_uuid)] = row.to_dict()
+        frames_lookup = {str(k): v for k, v in frames_dict.set_index("event_uuid").to_dict(orient="index").items()}
 
-    for _, pressure_event in pressure_events.iterrows():
+    for pressure_event in pressure_events.to_dict(orient="records"):
         try:
             related_event_ids = _normalise_related_events(pressure_event.get("related_events", []))
             if not related_event_ids:
                 continue
 
             pressure_team_id = pressure_event.get("team_id", None)
-            candidate_events: list[tuple[str, pd.Series]] = []
+            candidate_events: list[tuple[str, dict[str, Any]]] = []
             for related_id in related_event_ids:
                 related_event = events_lookup.get(related_id)
                 if related_event is None:

@@ -99,13 +99,9 @@ def extract_spatial_features_from_frame(
         features["opps_within_4yd"] = 0
         features["angle_nearest_opp"] = 0.0
 
-    # pyrefly: ignore [bad-argument-type]
-    features["coverage_arc"] = angular_span(bc, opps, radius=coverage_radius)
-    # pyrefly: ignore [bad-argument-type]
-    features["voronoi_area"] = voronoi_area(bc, all_players)
-
-    # pyrefly: ignore [bad-argument-type]
-    features["pitch_control"] = pitch_control_value(bc, tms, opps)
+    features["coverage_arc"] = angular_span(bc, opps, radius=coverage_radius)  # type: ignore[arg-type]
+    features["voronoi_area"] = voronoi_area(bc, all_players)  # type: ignore[arg-type]
+    features["pitch_control"] = pitch_control_value(bc, tms, opps)  # type: ignore[arg-type]
 
     if len(opps) > 0:
         features["opp_density_5yd"] = int(np.sum(np.linalg.norm(opps - bc, axis=1) <= 5.0))
@@ -161,8 +157,7 @@ def extract_spatial_features_from_frame(
             tm_xt = xt_value(tm[0], tm[1])
             # Check if progressive (higher xT or strictly closer to goal line)
             if tm_xt > bc_xt or tm[0] > bc[0] + 5.0:
-                # pyrefly: ignore [bad-argument-type]
-                if lane_unblocked(bc, tm, opps):
+                if lane_unblocked(bc, tm, opps):  # type: ignore[arg-type]
                     features["has_progressive_option"] = 1
                     break
 

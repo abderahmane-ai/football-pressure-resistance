@@ -106,8 +106,8 @@ def xt_value(x: float, y: float) -> float:
     """Expected threat lookup based on the loaded xT grid."""
     pitch_len: float = SPATIAL_CONFIG["pitch_length"]
     pitch_wid: float = SPATIAL_CONFIG["pitch_width"]
-    cols: int = SPATIAL_CONFIG["xt_grid_cols"]
-    rows: int = SPATIAL_CONFIG["xt_grid_rows"]
+    cols = int(SPATIAL_CONFIG["xt_grid_cols"])
+    rows = int(SPATIAL_CONFIG["xt_grid_rows"])
 
     x_idx = int(np.clip((x / pitch_len) * cols, 0, cols - 1))
     y_idx = int(np.clip((y / pitch_wid) * rows, 0, rows - 1))

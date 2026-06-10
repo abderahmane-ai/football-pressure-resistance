@@ -68,7 +68,7 @@ def define_success(
             # Receipt, Tactical Shift, etc.) are *excluded* rather than
             # silently labelled as failures.
             success = np.nan
-            lookahead: int = SPATIAL_CONFIG["carry_lookahead_events"]
+            lookahead = int(SPATIAL_CONFIG["carry_lookahead_events"])
             for offset in range(1, min(lookahead + 1, len(events) - bc_idx)):
                 next_event = events.iloc[bc_idx + offset]
                 ev_type: str = next_event["type"]

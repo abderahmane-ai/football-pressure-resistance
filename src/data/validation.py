@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterable
+from typing import Any
 
 import pandas as pd
 
@@ -60,12 +61,13 @@ def _ensure_columns(df: pd.DataFrame, required_columns: Iterable[str], context: 
 def _is_valid_location(value: object) -> bool:
     if value is None or (isinstance(value, float) and math.isnan(value)):
         return True
-    # pyrefly: ignore [bad-argument-type]
-    if not hasattr(value, "__len__") or len(value) < 2:
+    if not hasattr(value, "__len__") or not hasattr(value, "__getitem__"):
         return False
-    # pyrefly: ignore [bad-index]
-    x, y = value[0], value[1]
-    return pd.notna(x) and pd.notna(y)
+    val_seq: Any = value
+    if len(val_seq) < 2:
+        return False
+    x, y = val_seq[0], val_seq[1]
+    return bool(pd.notna(x) and pd.notna(y))
 
 
 def validate_statsbomb_events(events_df: pd.DataFrame, context: str = "events") -> None:
