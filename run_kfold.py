@@ -11,7 +11,8 @@ import pandas as pd
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-COMPS = ["Euro_2020", "Euro_2024", "World_Cup_2022", "Bundesliga_2024"]
+COMPS = ["Euro_2020", "Euro_2024", "World_Cup_2022", "Bundesliga_2024",
+         "Copa_America_2024", "AFCON_2023", "MLS_2023"]
 
 
 def get_python_cmd() -> str:
@@ -80,6 +81,7 @@ def main() -> None:
 
 
         steps = [
+            [python_cmd, "-m", "src.features.train_vaep"],
             [python_cmd, "-m", "src.data.builder"],
             [python_cmd, "-m", "src.models.bayesian"],
             [python_cmd, "-m", "src.models.inference"],

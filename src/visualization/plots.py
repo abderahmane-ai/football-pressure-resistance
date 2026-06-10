@@ -180,9 +180,38 @@ def plot_marginal_curves() -> None:
         plt.savefig(FIGURES_DIR / "3_marginal_arc.png", dpi=300)
         plt.close()
 
+def plot_calibration_curve() -> None:
+    """Reliability diagram: observed vs predicted success probability."""
+    from config import CROSS_VALIDATION_HOLDOUT
+    holdout = CROSS_VALIDATION_HOLDOUT
+    path = TABLES_DIR / f"calibration_curve_{holdout}.csv"
+    if not path.exists():
+        return
+
+    df = pd.read_csv(path)
+    if df.empty:
+        return
+
+    plt.figure(figsize=(8, 8))
+    plt.plot(df["prob_pred"], df["prob_true"], "o-", color="royalblue", lw=2, label="Model")
+    plt.plot([0, 1], [0, 1], "k--", alpha=0.5, label="Perfect calibration")
+    plt.fill_between(df["prob_pred"], df["prob_true"], df["prob_pred"], alpha=0.15, color="royalblue")
+    plt.xlabel("Predicted Probability", fontsize=12)
+    plt.ylabel("Observed Frequency", fontsize=12)
+    plt.title("Calibration: Predicted vs Observed Success Probability", fontsize=13)
+    plt.legend(loc="upper left")
+    plt.xlim(0, 1)
+    plt.ylim(0, 1)
+    plt.gca().set_aspect("equal")
+    plt.tight_layout()
+    plt.savefig(FIGURES_DIR / "4_calibration.png", dpi=300)
+    plt.close()
+    logger.info("Saved calibration curve plot.")
+
 if __name__ == "__main__":
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     plot_prs_leaderboard()
     plot_feature_importance()
     plot_marginal_curves()
     plot_stability_analysis()
+    plot_calibration_curve()

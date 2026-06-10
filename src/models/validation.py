@@ -22,6 +22,7 @@ from config import (
     TABLES_DIR,
 )
 from src.data.validation import validate_model_dataset
+from src.features.spatial import expand_spline_features
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +58,17 @@ def run_cross_validation() -> None:
     with open(scaler_path, "rb") as f:
         scaler_data: dict[str, Any] = pickle.load(f)
     feature_names: list[str] = scaler_data["features"]
+
+    # Filter to tight pressure BEFORE spline expansion (raw dist_nearest_opp is needed)
+    if "dist_nearest_opp" in holdout_df.columns:
+        holdout_df = holdout_df[holdout_df["dist_nearest_opp"] <= SPATIAL_CONFIG["tight_pressure_radius"]]
+
+    # Expand spline features using the fitted transformers saved with the scaler
+    spline_transformers = scaler_data.get("spline_transformers")
+    if spline_transformers:
+        holdout_df = expand_spline_features(holdout_df, spline_transformers)
+
     validate_model_dataset(holdout_df, feature_names, context="holdout pressure dataset")
-    holdout_df = holdout_df[holdout_df["dist_nearest_opp"] <= SPATIAL_CONFIG["tight_pressure_radius"]]
 
     trace: az.InferenceData = az.from_netcdf(trace_path)
     with open(mapping_path, "rb") as f:
@@ -160,6 +170,16 @@ def run_cross_validation() -> None:
             "Holdout AUC skipped: only one success class present in holdout data. "
             "This typically means the holdout set is too small or homogeneous."
         )
+
+    # Calibration — Expected Calibration Error (ECE)
+    from sklearn.calibration import calibration_curve
+    prob_true, prob_pred = calibration_curve(y_true_bin, y_pred_prob, n_bins=10)
+    ece: float = float(np.mean(np.abs(prob_true - prob_pred)))
+    logger.info("  Expected Calibration Error (ECE): %.4f", ece)
+
+    # Save calibration data for plotting
+    cal_df = pd.DataFrame({"prob_pred": prob_pred, "prob_true": prob_true})
+    cal_df.to_csv(TABLES_DIR / f"calibration_curve_{holdout}.csv", index=False)
 
     TABLES_DIR.mkdir(parents=True, exist_ok=True)
     merged.to_csv(TABLES_DIR / f"holdout_correlation_data_{holdout}.csv", index=False)

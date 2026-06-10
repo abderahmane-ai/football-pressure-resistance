@@ -1,7 +1,7 @@
 """Tests for src.features.spatial.extract_spatial_features_from_frame."""
 import numpy as np
 
-from config import MODEL_FEATURE_COLUMNS
+from config import MODEL_FEATURE_COLUMNS_BASE, SPLINE_FEATURES
 from src.features.spatial import extract_spatial_features_from_frame
 
 
@@ -34,7 +34,7 @@ class TestBasicExtraction:
         )
         assert result is None
 
-    def test_returns_all_model_features(self):
+    def test_returns_all_base_features(self):
         frame = _frame([60, 40], [[55, 38]], [[62, 40]])
         result = extract_spatial_features_from_frame(
             frame_data=frame,
@@ -43,7 +43,8 @@ class TestBasicExtraction:
             opponent_team_id="B",
         )
         assert result is not None
-        for col in MODEL_FEATURE_COLUMNS:
+        base_cols = MODEL_FEATURE_COLUMNS_BASE + SPLINE_FEATURES
+        for col in base_cols:
             assert col in result, f"Missing feature: {col}"
 
 

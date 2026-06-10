@@ -14,6 +14,14 @@ from src.data.pairing import pair_pressure_with_ball_carrier
 from src.features.geometry import xt_value
 from src.features.spatial import extract_spatial_features_from_frame
 
+_VAEP_CACHE: dict[int, dict[str, float]] = {}
+_HAS_VAEP: bool = True
+try:
+    from src.features.vaep import compute_vaep
+except ImportError:
+    _HAS_VAEP = False
+    compute_vaep = None  # type: ignore[assignment]
+
 logger = logging.getLogger(__name__)
 
 
@@ -79,11 +87,20 @@ def compute_intended_xt(
     match_events_list: list[dict[str, Any]] | None = None,
 ) -> float | None:
     """
-    Compute the intended expected threat (xT) of the action, regardless of success.
-    This separates the value of the action from its outcome for the Hurdle model.
+    Compute the intended value of the action, regardless of success.
+
+    Uses VAEP if pre-trained models are available (preferred), otherwise
+    falls back to discrete Expected Threat (xT).  This separates the value
+    of the action from its outcome for the Hurdle model.
     """
     bc_event_id: str = item["ball_carrier_event_id"]
 
+    # Try VAEP first (cached per match)
+    match_id = item.get("match_id")
+    if match_id is not None and match_id in _VAEP_CACHE:
+        return _VAEP_CACHE[match_id].get(bc_event_id)
+
+    # Fall back to xT
     if id_to_idx is not None and (match_events_list is not None or not match_events.empty):
         bc_idx = id_to_idx.get(bc_event_id)
         if bc_idx is None:
@@ -101,7 +118,6 @@ def compute_intended_xt(
 
     bc_loc = bc_event.get("location")
     if not _is_valid_loc(bc_loc):
-        # Impute from previous event
         if bc_idx > 0:
             if match_events_list is not None:
                 prev_event = match_events_list[bc_idx - 1]
@@ -198,6 +214,16 @@ def _process_single_match(
                 .to_dict()
             )
 
+        # Pre-compute VAEP for all events in this match (cached for O(1) lookup)
+        if _HAS_VAEP and compute_vaep is not None:
+            try:
+                vaep_values = compute_vaep(match_events)
+                if vaep_values is not None and "id" in match_events.columns:
+                    match_vaep = dict(zip(match_events["id"], vaep_values))
+                    _VAEP_CACHE[match_id] = match_vaep
+            except Exception:
+                logger.debug("VAEP computation failed for match %d, falling back to xT", match_id)
+
         n_labeled = len(labeled_events)
         n_features_ok = 0
         n_dist_ok = 0
@@ -216,6 +242,27 @@ def _process_single_match(
                 if "period" in ev:
                     match_context["match_period"] = ev["period"]
                 match_context["game_state_diff"] = game_states.get(item["ball_carrier_event_id"], 0)
+
+            # Counter-press flag from the pressure event
+            press_ev = event_lookup.get(item["pressure_event_id"])
+            if press_ev is not None:
+                match_context["counter_press"] = press_ev.get("counterpress", False)
+            else:
+                match_context["counter_press"] = False
+
+            # Pass height from the ball-carrier event (categorical: Ground/Low/High)
+            if ev is not None and ev.get("type") == "Pass":
+                pass_info = ev.get("pass")
+                if isinstance(pass_info, dict):
+                    height_info = pass_info.get("height")
+                    if isinstance(height_info, dict):
+                        match_context["pass_height_id"] = height_info.get("id", 0)
+                    else:
+                        match_context["pass_height_id"] = 0
+                else:
+                    match_context["pass_height_id"] = 0
+            else:
+                match_context["pass_height_id"] = 0
 
             features = extract_spatial_features_from_frame(
                 frame_data=item["frame_data"],

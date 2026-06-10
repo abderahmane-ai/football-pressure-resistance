@@ -20,6 +20,7 @@ from config import (
     TABLES_DIR,
 )
 from src.data.validation import validate_model_dataset
+from src.features.spatial import expand_spline_features
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,12 @@ def run_posterior_analysis() -> None:
         max_value: float = scaler_data["max_value"]
 
     df = pd.read_parquet(dataset_path)
+
+    # Expand spline features using the fitted transformers saved with the scaler
+    spline_transformers = scaler_data.get("spline_transformers")
+    if spline_transformers:
+        df = expand_spline_features(df, spline_transformers)
+
     validate_model_dataset(df, feature_names, context="posterior analysis dataset")
     event_counts: dict[Any, int] = df["player_id"].value_counts().to_dict()
 
@@ -88,43 +95,82 @@ def run_posterior_analysis() -> None:
     theta_val: np.ndarray = post["theta_val"].values.reshape(-1, len(player_mapping))
     gamma_pos_val: np.ndarray = post["gamma_pos_val"].values.reshape(-1, len(pos_mapping))
 
-    # Opponent and competition posterior effects
+    # Extract correlation between θ_succ and θ_val
+    rho_theta = post.get("rho_theta", None)
+    if rho_theta is not None:
+        rho_vals = getattr(rho_theta, "values", rho_theta)
+        rho_mean: float = float(rho_vals.mean())
+        rho_hdi = az.hdi(rho_vals.flatten(), hdi_prob=0.90)
+        logger.info(
+            "Correlation ρ(θ_succ, θ_val): mean=%.3f, 90%% HDI=[%.3f, %.3f]",
+            rho_mean, rho_hdi[0], rho_hdi[1],
+        )
+
+    # Opponent, competition, and team posterior effects
     delta_opp_succ: np.ndarray = post["delta_opp_succ"].values.reshape(-1, post["delta_opp_succ"].shape[-1])
     zeta_comp_succ: np.ndarray = post["zeta_comp_succ"].values.reshape(-1, post["zeta_comp_succ"].shape[-1])
+    eta_team_succ: np.ndarray = post["eta_team_succ"].values.reshape(-1, post["eta_team_succ"].shape[-1])
     delta_opp_val: np.ndarray = post["delta_opp_val"].values.reshape(-1, post["delta_opp_val"].shape[-1])
     zeta_comp_val: np.ndarray = post["zeta_comp_val"].values.reshape(-1, post["zeta_comp_val"].shape[-1])
+    eta_team_val: np.ndarray = post["eta_team_val"].values.reshape(-1, post["eta_team_val"].shape[-1])
 
     # Marginalise by posterior group mean; shape: (n_samples,)
     mean_opp_succ: np.ndarray = delta_opp_succ.mean(axis=1)
     mean_comp_succ: np.ndarray = zeta_comp_succ.mean(axis=1)
+    mean_team_succ: np.ndarray = eta_team_succ.mean(axis=1)
     mean_opp_val: np.ndarray = delta_opp_val.mean(axis=1)
     mean_comp_val: np.ndarray = zeta_comp_val.mean(axis=1)
+    mean_team_val: np.ndarray = eta_team_val.mean(axis=1)
 
     tight_dist: float = SPATIAL_CONFIG["tight_pressure_radius"] * 0.3
     loose_dist: float = SPATIAL_CONFIG["tight_pressure_radius"] * 0.6
 
+    # Pre-compute spline basis for distance scenarios
+    dist_spline_cols = [c for c in feature_names if c.startswith('dist_nearest_opp_spline_')]
+    dist_scenario_vecs: dict[str, np.ndarray] = {}
+    if dist_spline_cols and scaler_data.get("spline_transformers"):
+        dist_tr = scaler_data["spline_transformers"].get("dist_nearest_opp")
+        if dist_tr is not None:
+            for label, dist_val in [("tight", tight_dist), ("loose", loose_dist)]:
+                basis = dist_tr.transform([[dist_val]])[0]
+                vec = np.zeros(len(feature_names))
+                for k, col_name in enumerate(dist_spline_cols):
+                    f_idx = feature_names.index(col_name)
+                    vec[f_idx] = (basis[k] - scaler.mean_[f_idx]) / scaler.scale_[f_idx]
+                dist_scenario_vecs[label] = vec
+
     scenarios: dict[str, dict[str, float]] = {
-        "Front_Tight":   {"dist_nearest_opp": tight_dist, "angle_nearest_opp": 0.0, "coverage_arc": 1.5},
-        "Front_Loose":   {"dist_nearest_opp": loose_dist, "angle_nearest_opp": 0.0, "coverage_arc": 0.8},
-        "Lateral_Tight": {"dist_nearest_opp": tight_dist, "angle_nearest_opp": np.pi / 2, "coverage_arc": 1.5},
-        "Lateral_Loose": {"dist_nearest_opp": loose_dist, "angle_nearest_opp": np.pi / 2, "coverage_arc": 0.8},
-        "Back_Tight":    {"dist_nearest_opp": tight_dist, "angle_nearest_opp": np.pi, "coverage_arc": 1.5},
-        "Back_Loose":    {"dist_nearest_opp": loose_dist, "angle_nearest_opp": np.pi, "coverage_arc": 0.8},
+        "Front_Tight":      {"distance": tight_dist, "angle_nearest_opp": 0.0, "coverage_arc": 1.5},
+        "Front_Loose":      {"distance": loose_dist, "angle_nearest_opp": 0.0, "coverage_arc": 0.8},
+        "Lateral_Tight":    {"distance": tight_dist, "angle_nearest_opp": np.pi / 2, "coverage_arc": 1.5},
+        "Lateral_Loose":    {"distance": loose_dist, "angle_nearest_opp": np.pi / 2, "coverage_arc": 0.8},
+        "Back_Tight":       {"distance": tight_dist, "angle_nearest_opp": np.pi, "coverage_arc": 1.5},
+        "Back_Loose":       {"distance": loose_dist, "angle_nearest_opp": np.pi, "coverage_arc": 0.8},
+        "CounterPress_High":{"distance": tight_dist, "angle_nearest_opp": 0.0, "coverage_arc": 2.5, "counter_press": 1},
+        "CounterPress_Low": {"distance": loose_dist, "angle_nearest_opp": np.pi, "coverage_arc": 0.5, "counter_press": 1},
+        "HighPass_Back":    {"distance": tight_dist, "angle_nearest_opp": np.pi, "coverage_arc": 1.5, "pass_height_high": 1},
+        "LowPass_Front":    {"distance": loose_dist, "angle_nearest_opp": 0.0, "coverage_arc": 0.5, "pass_height_ground": 1},
     }
 
     # Scenario feature vectors: unmentioned features are set to their
     # standardized mean (zero in scaled space), representing the "average
     # situation" baseline — an intentional design choice.
+    # For dist_nearest_opp (which is spline-expanded), we use the pre-computed
+    # spline basis vector stored in dist_scenario_vecs.
     scenario_vectors: dict[str, np.ndarray] = {}
     for name, s in scenarios.items():
         vec = np.zeros(len(feature_names))
+        dist_label = "tight" if s.get("distance") == tight_dist else "loose" if s.get("distance") == loose_dist else None
+        if dist_label and dist_label in dist_scenario_vecs:
+            vec += dist_scenario_vecs[dist_label]
         for f_name, val in s.items():
+            if f_name == "distance":
+                continue
             if f_name in feature_names:
                 f_idx = feature_names.index(f_name)
-                if f_name not in ("opps_within_1yd", "opps_within_2yd", "opps_within_4yd", "has_progressive_option"):
+                if f_name not in ("opps_within_1yd", "opps_within_2yd", "opps_within_4yd", "has_progressive_option", "counter_press"):
                     vec[f_idx] = (val - scaler.mean_[f_idx]) / scaler.scale_[f_idx]
                 else:
-                    # Binary/count features: use 0, not scaled mean
                     vec[f_idx] = (0 - scaler.mean_[f_idx]) / scaler.scale_[f_idx]
         scenario_vectors[name] = vec
 
@@ -139,9 +185,9 @@ def run_posterior_analysis() -> None:
         pos_effect_val = gamma_pos_val[:, p_code] if p_code is not None else gamma_pos_val[:, mid_pos_code]
 
         logit_succ = (alpha_succ + np.dot(beta_succ, scenario_vec) + pos_effect_succ
-                      + mean_opp_succ + mean_comp_succ)
+                      + mean_opp_succ + mean_comp_succ + mean_team_succ)
         logit_val = (alpha_val + np.dot(beta_val, scenario_vec) + pos_effect_val
-                     + mean_opp_val + mean_comp_val)
+                     + mean_opp_val + mean_comp_val + mean_team_val)
 
         if player_idx is not None:
             logit_succ += theta_succ[:, player_idx]

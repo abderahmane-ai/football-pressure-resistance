@@ -60,20 +60,38 @@ def get_player_position_groups_from_lineups(
                     for pos_dict in positions:
                         if isinstance(pos_dict, dict):
                             pos_name: str = pos_dict.get("position", "").lower()
-                            if any(x in pos_name for x in ["back", "defender", "wing back"]):
-                                position_map[player_id] = "Defender"
+                            if "goalkeeper" in pos_name:
                                 assigned = True
                                 break
-                            elif any(x in pos_name for x in ["forward", "striker", "wing", "winger"]):
-                                position_map[player_id] = "Forward"
+                            elif "wing back" in pos_name or ("back" in pos_name and not any(x in pos_name for x in ["center", "centre"])):
+                                position_map[player_id] = "FB"
                                 assigned = True
                                 break
-                            elif "midfield" in pos_name:
-                                position_map[player_id] = "Midfielder"
+                            elif any(x in pos_name for x in ["center back", "centre back"]):
+                                position_map[player_id] = "CB"
+                                assigned = True
+                                break
+                            elif "defensive midfielder" in pos_name or "defensive midfield" in pos_name:
+                                position_map[player_id] = "DM"
+                                assigned = True
+                                break
+                            elif "midfielder" in pos_name or "midfield" in pos_name:
+                                if "right" in pos_name or "left" in pos_name:
+                                    position_map[player_id] = "W"
+                                else:
+                                    position_map[player_id] = "CM"
+                                assigned = True
+                                break
+                            elif any(x in pos_name for x in ["wing", "winger"]):
+                                position_map[player_id] = "W"
+                                assigned = True
+                                break
+                            elif any(x in pos_name for x in ["forward", "striker"]):
+                                position_map[player_id] = "CF"
                                 assigned = True
                                 break
                     if not assigned:
-                        position_map[player_id] = "Midfielder"
+                        position_map[player_id] = "CM"
 
     # Impute missing using event locations (filter to open-play events
     # to avoid skewing from goal kicks, throw-ins, etc.)
@@ -94,14 +112,22 @@ def get_player_position_groups_from_lineups(
                 if not player_events.empty:
                     locs = np.array(player_events["location"].tolist())
                     avg_x: float = float(np.mean(locs[:, 0]))
+                    avg_y: float = float(np.mean(locs[:, 1]))
                     third: float = SPATIAL_CONFIG["pitch_length"] / 3.0
+                    half_width: float = SPATIAL_CONFIG["pitch_width"] / 2.0
+                    wide_threshold: float = half_width * 0.4
+                    is_wide: bool = abs(avg_y - half_width) > wide_threshold
                     if avg_x < third:
-                        position_map[pid] = "Defender"
+                        position_map[pid] = "FB" if is_wide else "CB"
                     elif avg_x > 2 * third:
-                        position_map[pid] = "Forward"
+                        position_map[pid] = "W" if is_wide else "CF"
                     else:
-                        position_map[pid] = "Midfielder"
+                        mid_third_mid: float = third + third / 2.0
+                        if avg_x < mid_third_mid:
+                            position_map[pid] = "DM"
+                        else:
+                            position_map[pid] = "CM"
                 else:
-                    position_map[pid] = "Midfielder"
+                    position_map[pid] = "CM"
 
     return position_map

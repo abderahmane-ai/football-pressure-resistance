@@ -13,10 +13,13 @@ TABLES_DIR         = OUTPUT_DIR / "tables"
 
 # Competitions (Verified available 360 data)
 COMPETITIONS = {
-    "Bundesliga_2024": {"comp_id": 9, "season_id": 281},
-    "World_Cup_2022": {"comp_id": 43, "season_id": 106},
-    "Euro_2024": {"comp_id": 55, "season_id": 282},
-    "Euro_2020": {"comp_id": 55, "season_id": 43},
+    "Bundesliga_2024":  {"comp_id": 9, "season_id": 281},
+    "World_Cup_2022":   {"comp_id": 43, "season_id": 106},
+    "Euro_2024":        {"comp_id": 55, "season_id": 282},
+    "Euro_2020":        {"comp_id": 55, "season_id": 43},
+    "Copa_America_2024":{"comp_id": 223, "season_id": 282},
+    "AFCON_2023":       {"comp_id": 225, "season_id": 283},
+    "MLS_2023":         {"comp_id": 194, "season_id": 289},
 }
 
 CROSS_VALIDATION_HOLDOUT = os.environ.get("PRS_HOLDOUT", "Euro_2020")
@@ -33,8 +36,8 @@ MODEL_SETTINGS = {
 
 MIN_EVENTS_THRESHOLD = 20  # Minimum pressure events for leaderboard inclusion
 
-MODEL_FEATURE_COLUMNS = [
-    "dist_nearest_opp",
+# Base features (before spline expansion)
+MODEL_FEATURE_COLUMNS_BASE = [
     "dist_2nd_nearest_opp",
     "opps_within_1yd",
     "opps_within_2yd",
@@ -50,12 +53,26 @@ MODEL_FEATURE_COLUMNS = [
     "opp_density_5yd",
     "has_progressive_option",
     "xt_value",
-    "bc_x",
-    "bc_y",
     "game_state_diff",
     "minutes_elapsed",
     "match_period",
+    "counter_press",
+    "pass_height_ground",
+    "pass_height_low",
+    "pass_height_high",
 ]
+
+# Features that get B-spline expansion (non-linear spatial effects)
+SPLINE_FEATURES = ["bc_x", "bc_y", "dist_nearest_opp"]
+
+# Final model feature columns: base + spline expansions
+# (spline column names are computed dynamically; n_knots=5, degree=3,
+# include_bias=False → 6 basis functions per feature)
+_SPLINE_N_BASIS = 6
+MODEL_FEATURE_COLUMNS = (
+    MODEL_FEATURE_COLUMNS_BASE
+    + [f"{feat}_spline_{i}" for feat in SPLINE_FEATURES for i in range(_SPLINE_N_BASIS)]
+)
 
 # Domain Spatial Constants
 SPATIAL_CONFIG = {
@@ -74,4 +91,22 @@ SPATIAL_CONFIG = {
     "clear_pass_distance": 2.0,
     "progressive_distance": 5.0,
     "carry_lookahead_events": 5,
+}
+
+# VAEP Configuration
+VAEP_CONFIG = {
+    "lookahead": 10,
+    "model_dir": str(DATA_DIR / "vaep_models"),
+    "test_size": 0.2,
+    "random_seed": 42,
+    "lgb_params": {
+        "n_estimators": 500,
+        "max_depth": 6,
+        "learning_rate": 0.05,
+        "num_leaves": 31,
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "reg_alpha": 0.1,
+        "reg_lambda": 0.1,
+    },
 }

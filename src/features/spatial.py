@@ -5,8 +5,9 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from sklearn.preprocessing import SplineTransformer
 
-from config import SPATIAL_CONFIG
+from config import SPATIAL_CONFIG, SPLINE_FEATURES
 
 from .geometry import angular_span, lane_unblocked, pitch_control_value, voronoi_area, xt_value
 
@@ -171,9 +172,72 @@ def extract_spatial_features_from_frame(
         features["game_state_diff"] = match_context.get("game_state_diff", 0)
         features["minutes_elapsed"] = match_context.get("minutes_elapsed", 0)
         features["match_period"] = match_context.get("match_period", 1)
+        features["counter_press"] = 1.0 if match_context.get("counter_press", False) else 0.0
+        ph = int(match_context.get("pass_height_id", 0))
+        features["pass_height_ground"] = 1.0 if ph == 1 else 0.0
+        features["pass_height_low"] = 1.0 if ph == 2 else 0.0
+        features["pass_height_high"] = 1.0 if ph == 3 else 0.0
     else:
         features["game_state_diff"] = 0
         features["minutes_elapsed"] = 0
         features["match_period"] = 1
+        features["counter_press"] = 0.0
+        features["pass_height_ground"] = 0.0
+        features["pass_height_low"] = 0.0
+        features["pass_height_high"] = 0.0
 
     return features
+
+
+# ── B-spline expansion ────────────────────────────────────────────────────────
+
+def fit_spline_transformers(
+    df: pd.DataFrame,
+    n_knots: int = 5,
+    degree: int = 3,
+) -> dict[str, SplineTransformer]:
+    """Fit one SplineTransformer per spatial feature for non-linear expansion.
+
+    NaN values are excluded from fitting.  Returns dict: feature_name → fitted
+    SplineTransformer.
+    """
+    transformers: dict[str, SplineTransformer] = {}
+    for feat in SPLINE_FEATURES:
+        if feat not in df.columns:
+            continue
+        values = df[feat].values.reshape(-1, 1)
+        valid_mask = ~np.isnan(values.flatten())
+        if valid_mask.sum() < 2:
+            continue
+        transformer = SplineTransformer(
+            n_knots=n_knots, degree=degree,
+            include_bias=False, extrapolation="constant",
+        )
+        transformer.fit(values[valid_mask])
+        transformers[feat] = transformer
+    return transformers
+
+
+def expand_spline_features(
+    df: pd.DataFrame,
+    transformers: dict[str, SplineTransformer],
+) -> pd.DataFrame:
+    """Add B-spline basis columns for each feature in *transformers*.
+
+    Original feature columns are replaced by their spline-expanded versions.
+    Rows with NaN in any spline input feature get zero-filled spline basis
+    values.  Returns a new DataFrame with spline columns appended.
+    """
+    result = df.copy()
+    for feat, transformer in transformers.items():
+        if feat not in result.columns:
+            continue
+        values = result[feat].values.reshape(-1, 1)
+        valid_mask = ~np.isnan(values.flatten())
+        basis = np.full((len(values), transformer.n_features_out_), np.nan)
+        if valid_mask.sum() > 0:
+            basis[valid_mask] = transformer.transform(values[valid_mask])
+        result = result.drop(columns=[feat])
+        for i in range(transformer.n_features_out_):
+            result[f"{feat}_spline_{i}"] = basis[:, i]
+    return result

@@ -30,8 +30,10 @@ def _build_trace(path):
         "gamma_pos_val": np.zeros((1, 4, 1)),
         "delta_opp_succ": np.zeros((1, 4, 1)),
         "zeta_comp_succ": np.zeros((1, 4, 1)),
+        "eta_team_succ": np.zeros((1, 4, 1)),
         "delta_opp_val": np.zeros((1, 4, 1)),
         "zeta_comp_val": np.zeros((1, 4, 1)),
+        "eta_team_val": np.zeros((1, 4, 1)),
     }
     az.from_dict(posterior=posterior).to_netcdf(path)
 
@@ -57,7 +59,7 @@ def _build_artifacts(tmp_path):
 
     scaler = StandardScaler().fit(np.zeros((2, len(FEATURES))))
     with open(traces_dir / f"pooled_scaler_{CROSS_VALIDATION_HOLDOUT}.pkl", "wb") as f:
-        pickle.dump({"scaler": scaler, "features": FEATURES, "max_value": 0.15}, f)
+        pickle.dump({"scaler": scaler, "features": FEATURES, "max_value": 0.15, "spline_transformers": None}, f)
 
     rows = []
     for player_id, name in [("p1", "High Player"), ("p2", "Low Player")]:

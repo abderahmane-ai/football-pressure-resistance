@@ -22,6 +22,7 @@ from config import (
     PROCESSED_DATA_DIR,
 )
 from src.data.validation import DataValidationError, validate_model_dataset
+from src.features.spatial import expand_spline_features, fit_spline_transformers
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
@@ -104,6 +105,7 @@ def _save_scaler(
     features: list[str],
     max_value: float,
     epsilon: float,
+    spline_transformers: dict[str, Any] | None = None,
 ) -> None:
     """Persist scaler, feature list, and scaling constants."""
     with open(path, "wb") as f:
@@ -112,6 +114,7 @@ def _save_scaler(
             "features": features,
             "max_value": max_value,
             "epsilon": epsilon,
+            "spline_transformers": spline_transformers,
         }, f)
 
 
@@ -120,6 +123,7 @@ def _save_mappings(
     player_mapping: dict[int, Any],
     comp_mapping: dict[int, str],
     opp_team_mapping: dict[int, Any],
+    team_mapping: dict[int, Any],
     pos_mapping: dict[int, str],
     name_lookup: dict[Any, str],
     pos_lookup: dict[Any, str],
@@ -130,6 +134,7 @@ def _save_mappings(
             "player": player_mapping,
             "competition": comp_mapping,
             "team": opp_team_mapping,
+            "att_team": team_mapping,
             "position": pos_mapping,
             "name_lookup": name_lookup,
             "position_lookup": pos_lookup,
@@ -201,6 +206,18 @@ def fit_pooled_model() -> az.InferenceData | None:
         return None
 
     df = pd.read_parquet(dataset_path)
+
+    # Expand spatial features with B-spline basis (replaces bc_x, bc_y, dist_nearest_opp
+    # with non-linear spline expansions that capture non-linear pitch geography)
+    logger.info("Fitting B-spline transformers on spatial features...")
+    spline_transformers = fit_spline_transformers(df, n_knots=5, degree=3)
+    df = expand_spline_features(df, spline_transformers)
+    logger.info(
+        "Spline expansion complete: %d basis columns generated for %d raw features",
+        sum(t.n_features_out_ for t in spline_transformers.values()),
+        len(spline_transformers),
+    )
+
     df, available_features = prepare_model_dataset(df)
 
     logger.info("Loaded dataset: %d observations, %d features", len(df), len(available_features))
@@ -226,13 +243,14 @@ def fit_pooled_model() -> az.InferenceData | None:
     else:
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X)
-        _save_scaler(scaler_path, scaler, available_features, max_value, epsilon)
+        _save_scaler(scaler_path, scaler, available_features, max_value, epsilon, spline_transformers)
         logger.info("Fitted and saved new scaler to %s", scaler_path)
 
     # ── Categorical indices ───────────────────────────────────────────────
     player_cats = df["player_id"].astype("category")
     comp_cats = df["competition"].astype("category")
     opp_team_cats = df["opponent_team_id"].astype("category")
+    team_cats = df["team_id"].astype("category")
     pos_cats = df["position_group"].astype("category")
 
     # pyrefly: ignore [bad-assignment]
@@ -242,17 +260,21 @@ def fit_pooled_model() -> az.InferenceData | None:
     # pyrefly: ignore [bad-assignment]
     opp_idx: np.ndarray = opp_team_cats.cat.codes.values
     # pyrefly: ignore [bad-assignment]
+    team_idx: np.ndarray = team_cats.cat.codes.values
+    # pyrefly: ignore [bad-assignment]
     pos_idx: np.ndarray = pos_cats.cat.codes.values
 
     n_players: int = len(player_cats.cat.categories)
     n_comp: int = len(comp_cats.cat.categories)
     n_opp: int = len(opp_team_cats.cat.categories)
+    n_teams: int = len(team_cats.cat.categories)
     n_pos: int = len(pos_cats.cat.categories)
     n_features: int = len(available_features)
 
     player_mapping: dict[int, Any] = dict(enumerate(player_cats.cat.categories))
     comp_mapping: dict[int, str] = dict(enumerate(comp_cats.cat.categories))
     opp_team_mapping: dict[int, Any] = dict(enumerate(opp_team_cats.cat.categories))
+    team_mapping: dict[int, Any] = dict(enumerate(team_cats.cat.categories))
     pos_mapping: dict[int, str] = dict(enumerate(pos_cats.cat.categories))
 
     name_lookup: dict[Any, str] = df.drop_duplicates("player_id").set_index("player_id")["player_name"].to_dict()
@@ -260,7 +282,7 @@ def fit_pooled_model() -> az.InferenceData | None:
 
     _save_mappings(
         mappings_path,
-        player_mapping, comp_mapping, opp_team_mapping, pos_mapping,
+        player_mapping, comp_mapping, opp_team_mapping, team_mapping, pos_mapping,
         name_lookup, pos_lookup,
     )
 
@@ -271,6 +293,7 @@ def fit_pooled_model() -> az.InferenceData | None:
     player_idx_val: np.ndarray = player_idx[mask]
     comp_idx_val: np.ndarray = comp_idx[mask]
     opp_idx_val: np.ndarray = opp_idx[mask]
+    team_idx_val: np.ndarray = team_idx[mask]
     pos_idx_val: np.ndarray = pos_idx[mask]
 
     with pm.Model():
@@ -285,15 +308,12 @@ def fit_pooled_model() -> az.InferenceData | None:
         pid_succ = player_idx
         cid_succ = comp_idx
         oid_succ = opp_idx
+        tid_succ = team_idx
         posid_succ = pos_idx
 
         alpha_succ = pm.Normal("alpha_succ", 0, 1.5)
         beta_succ = pm.Normal("beta_succ", 0, 1.0, shape=n_features)
         gamma_pos_succ = pm.Normal("gamma_pos_succ", 0, 1.0, shape=n_pos)
-
-        sigma_theta_succ = pm.Exponential("sigma_theta_succ", 1.0)
-        theta_raw_succ = pm.Normal("theta_raw_succ", 0, 1, shape=n_players)
-        theta_succ = pm.Deterministic("theta_succ", theta_raw_succ * sigma_theta_succ)
 
         sigma_opp_succ = pm.Exponential("sigma_opp_succ", 1.0)
         opp_raw_succ = pm.Normal("opp_raw_succ", 0, 1, shape=n_opp)
@@ -303,12 +323,29 @@ def fit_pooled_model() -> az.InferenceData | None:
         comp_raw_succ = pm.Normal("comp_raw_succ", 0, 1, shape=n_comp)
         zeta_comp_succ = pm.Deterministic("zeta_comp_succ", comp_raw_succ * sigma_comp_succ)
 
+        sigma_team_succ = pm.Exponential("sigma_team_succ", 1.0)
+        team_raw_succ = pm.Normal("team_raw_succ", 0, 1, shape=n_teams)
+        eta_team_succ = pm.Deterministic("eta_team_succ", team_raw_succ * sigma_team_succ)
+
+        # Multivariate Normal for correlated θ_succ / θ_val
+        # LKJ(η=2) gives a weak prior favouring near-zero correlation
+        # pm.LKJCholeskyCov returns (cholesky, corr_matrix, stds) tuple
+        theta_chol_packed = pm.LKJCholeskyCov("theta_chol", n=2, eta=2.0,
+                                               sd_dist=pm.Exponential.dist(1.0, shape=2))
+        theta_chol, theta_corr, _ = theta_chol_packed
+        theta_offset = pm.Normal("theta_offset", 0, 1, shape=(n_players, 2))
+        theta = pm.Deterministic("theta", pm.math.dot(theta_offset, theta_chol.T))
+        theta_succ = pm.Deterministic("theta_succ", theta[:, 0])
+        theta_val = pm.Deterministic("theta_val", theta[:, 1])
+        pm.Deterministic("rho_theta", theta_corr[0, 1])
+
         logit_p = (alpha_succ +
                    pm.math.dot(X_data_succ, beta_succ) +
                    gamma_pos_succ[posid_succ] +
                    theta_succ[pid_succ] +
                    delta_opp_succ[oid_succ] +
-                   zeta_comp_succ[cid_succ])
+                   zeta_comp_succ[cid_succ] +
+                   eta_team_succ[tid_succ])
 
         p = pm.Deterministic("p", pm.math.invlogit(logit_p))
         pm.Bernoulli("y_succ_obs", p=p, observed=y_success)
@@ -318,15 +355,12 @@ def fit_pooled_model() -> az.InferenceData | None:
         pid_val = player_idx_val
         cid_val = comp_idx_val
         oid_val = opp_idx_val
+        tid_val = team_idx_val
         posid_val = pos_idx_val
 
         alpha_val = pm.Normal("alpha_val", 0, 1.5)
         beta_val = pm.Normal("beta_val", 0, 1.0, shape=n_features)
         gamma_pos_val = pm.Normal("gamma_pos_val", 0, 1.0, shape=n_pos)
-
-        sigma_theta_val = pm.Exponential("sigma_theta_val", 1.0)
-        theta_raw_val = pm.Normal("theta_raw_val", 0, 1, shape=n_players)
-        theta_val = pm.Deterministic("theta_val", theta_raw_val * sigma_theta_val)
 
         sigma_opp_val = pm.Exponential("sigma_opp_val", 1.0)
         opp_raw_val = pm.Normal("opp_raw_val", 0, 1, shape=n_opp)
@@ -336,12 +370,17 @@ def fit_pooled_model() -> az.InferenceData | None:
         comp_raw_val = pm.Normal("comp_raw_val", 0, 1, shape=n_comp)
         zeta_comp_val = pm.Deterministic("zeta_comp_val", comp_raw_val * sigma_comp_val)
 
+        sigma_team_val = pm.Exponential("sigma_team_val", 1.0)
+        team_raw_val = pm.Normal("team_raw_val", 0, 1, shape=n_teams)
+        eta_team_val = pm.Deterministic("eta_team_val", team_raw_val * sigma_team_val)
+
         logit_mu = (alpha_val +
                     pm.math.dot(X_data_val, beta_val) +
                     gamma_pos_val[posid_val] +
                     theta_val[pid_val] +
                     delta_opp_val[oid_val] +
-                    zeta_comp_val[cid_val])
+                    zeta_comp_val[cid_val] +
+                    eta_team_val[tid_val])
 
         mu = pm.Deterministic("mu", pm.math.invlogit(logit_mu))
         kappa = pm.Exponential("kappa", 0.1)  # Mean=10; stable concentration for Beta regression

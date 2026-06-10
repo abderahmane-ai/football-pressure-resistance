@@ -18,21 +18,25 @@ def _posterior_array(values):
 
 def _build_trace(path):
     # Ensure all required posterior parameters are mock-sampled for interpretability
+    # theta_chol: packed lower-triangular Cholesky factor [chol[0,0], chol[1,0], chol[1,1]]
+    theta_chol_data = np.array([[0.5, 0.1, 0.4]])
+    theta_chol = np.broadcast_to(theta_chol_data, (1, 4, 3)).copy()
     posterior = {
         "alpha_succ": _posterior_array([0, 0, 0, 0]),
         "beta_succ": np.zeros((1, 4, len(FEATURES))),
         "theta_succ": np.array([[[1.0, 0.2], [1.0, 0.2], [1.0, 0.2], [1.0, 0.2]]]),
         "gamma_pos_succ": np.zeros((1, 4, 1)),
-        "sigma_theta_succ": _posterior_array([0.5, 0.5, 0.5, 0.5]),
+        "theta_chol": theta_chol,
         "sigma_opp_succ": _posterior_array([0.1, 0.1, 0.1, 0.1]),
         "sigma_comp_succ": _posterior_array([0.05, 0.05, 0.05, 0.05]),
+        "sigma_team_succ": _posterior_array([0.03, 0.03, 0.03, 0.03]),
         "alpha_val": _posterior_array([0, 0, 0, 0]),
         "beta_val": np.zeros((1, 4, len(FEATURES))),
         "theta_val": np.array([[[0.3, 0.1], [0.3, 0.1], [0.3, 0.1], [0.3, 0.1]]]),
         "gamma_pos_val": np.zeros((1, 4, 1)),
-        "sigma_theta_val": _posterior_array([0.4, 0.4, 0.4, 0.4]),
         "sigma_opp_val": _posterior_array([0.15, 0.15, 0.15, 0.15]),
         "sigma_comp_val": _posterior_array([0.06, 0.06, 0.06, 0.06]),
+        "sigma_team_val": _posterior_array([0.04, 0.04, 0.04, 0.04]),
         "delta_opp_succ": np.zeros((1, 4, 1)),
         "zeta_comp_succ": np.zeros((1, 4, 1)),
         "delta_opp_val": np.zeros((1, 4, 1)),
@@ -62,7 +66,7 @@ def _build_artifacts(tmp_path):
 
     scaler = StandardScaler().fit(np.zeros((2, len(FEATURES))))
     with open(traces_dir / f"pooled_scaler_{CROSS_VALIDATION_HOLDOUT}.pkl", "wb") as f:
-        pickle.dump({"scaler": scaler, "features": FEATURES, "max_value": 0.15}, f)
+        pickle.dump({"scaler": scaler, "features": FEATURES, "max_value": 0.15, "spline_transformers": None}, f)
 
     # Write synthetic prs_leaderboard_{holdout}.csv
     leaderboard_df = pd.DataFrame([
