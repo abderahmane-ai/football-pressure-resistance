@@ -11,8 +11,6 @@ import logging
 from pathlib import Path
 from typing import Any, cast
 
-import joblib
-import lightgbm as lgb
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
@@ -20,6 +18,16 @@ from sklearn.model_selection import train_test_split
 from config import SPATIAL_CONFIG, VAEP_CONFIG
 
 logger = logging.getLogger(__name__)
+
+# Conditional imports to allow basic testing and fallback without LightGBM
+try:
+    import joblib
+    import lightgbm as lgb
+    _HAS_ML_LIBS = True
+except ImportError:
+    _HAS_ML_LIBS = False
+    joblib = None
+    lgb = None
 
 _VAEP_MODEL_DIR: Path = Path(cast(str, VAEP_CONFIG["model_dir"]))
 
@@ -124,14 +132,16 @@ def _compute_labels(
             end = min(j + lookahead + 1, len(idx))
             for k in range(j + 1, end):
                 if goal_mask[k]:
-                    if teams[k - j] == teams[0]:
+                    if teams[k] == teams[j]:
                         scores_next[gi] = 1
                     else:
                         concedes_next[gi] = 1
                     break
                 if own_mask[k]:
-                    if teams[k - j] != teams[0]:
+                    if teams[k] != teams[j]:
                         scores_next[gi] = 1
+                    else:
+                        concedes_next[gi] = 1
                     break
 
     result = pd.DataFrame({
@@ -153,6 +163,8 @@ def train_vaep_models(events: pd.DataFrame) -> tuple[Any, Any]:
     Models are saved to ``VAEP_CONFIG['model_dir']``.
     Returns (score_model, concede_model).
     """
+    if not _HAS_ML_LIBS or lgb is None or joblib is None:
+        raise ImportError("lightgbm and joblib are required to train VAEP models.")
     _VAEP_MODEL_DIR.mkdir(parents=True, exist_ok=True)
     score_path = _VAEP_MODEL_DIR / "vaep_score.pkl"
     concede_path = _VAEP_MODEL_DIR / "vaep_concede.pkl"
@@ -208,6 +220,8 @@ def train_vaep_models(events: pd.DataFrame) -> tuple[Any, Any]:
 
 def load_vaep_models() -> tuple[Any, Any] | None:
     """Load pre-trained VAEP models from disk. Returns None if not found."""
+    if not _HAS_ML_LIBS or joblib is None:
+        return None
     score_path = _VAEP_MODEL_DIR / "vaep_score.pkl"
     concede_path = _VAEP_MODEL_DIR / "vaep_concede.pkl"
     if not score_path.exists() or not concede_path.exists():
