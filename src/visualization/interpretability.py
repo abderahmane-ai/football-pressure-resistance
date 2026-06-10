@@ -175,7 +175,9 @@ def run_interpretability_analysis() -> None:
 
     # ── 4. ICE curves ─────────────────────────────────────────────────────────
     logger.info("4. ICE Curves for Top/Bottom Players")
-    lb_path = TABLES_DIR / "prs_leaderboard.csv"
+    lb_path = TABLES_DIR / f"prs_leaderboard_{holdout}.csv"
+    if not lb_path.exists():
+        lb_path = TABLES_DIR / "prs_leaderboard.csv"
     if lb_path.exists():
         lb_df = pd.read_csv(lb_path)
         top_3 = lb_df.head(3)

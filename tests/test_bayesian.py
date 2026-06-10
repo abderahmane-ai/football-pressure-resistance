@@ -50,3 +50,38 @@ def test_prepare_model_dataset_requires_success_rows_for_beta_component():
 
     with pytest.raises(DataValidationError, match="zero successful actions"):
         prepare_model_dataset(raw)
+
+
+def test_mcmc_smoke(tmp_path, monkeypatch):
+    import os
+    from config import CROSS_VALIDATION_HOLDOUT
+    from src.models import bayesian
+
+    # 1. Setup temporary directories
+    traces_dir = tmp_path / "model_traces"
+    processed_dir = tmp_path / "processed"
+    traces_dir.mkdir()
+    processed_dir.mkdir()
+
+    monkeypatch.setattr(bayesian, "MODEL_TRACES_DIR", traces_dir)
+    monkeypatch.setattr(bayesian, "PROCESSED_DATA_DIR", processed_dir)
+    monkeypatch.setenv("PRS_ALLOW_CPU", "1")
+
+    # 2. Modify model settings to make it super fast
+    monkeypatch.setitem(bayesian.MODEL_SETTINGS, "draws", 5)
+    monkeypatch.setitem(bayesian.MODEL_SETTINGS, "tune", 5)
+    monkeypatch.setitem(bayesian.MODEL_SETTINGS, "chains", 1)
+
+    # 3. Create dummy dataset in processed directory
+    df = make_model_df(success_values=(1.0, 0.0, 1.0, 1.0, 0.0, 1.0))
+    # Add dummy competition column
+    df["competition"] = CROSS_VALIDATION_HOLDOUT
+    df.to_parquet(processed_dir / f"all_pressure_dataset_{CROSS_VALIDATION_HOLDOUT}.parquet")
+
+    # 4. Fit the model
+    trace = bayesian.fit_pooled_model()
+
+    assert trace is not None
+    assert (traces_dir / f"pooled_trace_{CROSS_VALIDATION_HOLDOUT}.nc").exists()
+    assert (traces_dir / f"pooled_scaler_{CROSS_VALIDATION_HOLDOUT}.pkl").exists()
+    assert (traces_dir / f"pooled_mappings_{CROSS_VALIDATION_HOLDOUT}.pkl").exists()
