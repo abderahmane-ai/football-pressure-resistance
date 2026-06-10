@@ -34,9 +34,9 @@ $$ d_{min} \le 5.0 \text{ yards} $$
 This forces the model to evaluate genuine, close-quarters duels, ensuring that a high PRS score translates directly to performance in the most heavily contested areas of the pitch.
 
 ### 2.3 Dynamic Positional Stratification
-Players are grouped into broad tactical roles: Defender, Midfielder, and Forward. This allows the hierarchical model to estimate baseline spatial constraints and expected values specific to each role. A center-back naturally operates in deeper zones with lower baseline Expected Threat (xT) opportunities compared to a forward receiving the ball on the edge of the penalty box. 
+Players are mapped to one of six fine-grained tactical roles derived directly from StatsBomb position IDs: **CB** (Centre-Back), **FB** (Full-Back / Wing-Back), **DM** (Defensive Midfielder), **CM** (Central Midfielder), **W** (Wide Midfielder / Winger), and **CF** (Centre-Forward / Striker). This six-group taxonomy replaces the coarser three-bracket scheme and allows the hierarchical model to set separate baseline priors for roles with genuinely different spatial profiles — a CB in a deep defensive block faces wholly different passing geometry from a CF on the shoulder of the last defender.
 
-To prevent the arbitrary misclassification of players who lack formal lineup data (a common issue in sprawling datasets), the system dynamically computes the spatial center of gravity (the average $X$ coordinate of all their recorded touches). This data-driven imputation ensures players are accurately assigned to their structural role, allowing them to be evaluated by an "Above-Replacement" standard strictly relative to their true positional peers.
+For players absent from the formal lineup data (a common edge case in sprawling multi-competition datasets), the system falls back to a coordinate-based imputation: it computes the average $X$ position of all open-play touches (passes, carries, dribbles, shots) and classifies the player based on which third of the pitch they habitually occupied, with a laterality check ($|y - 40| > 16$ yards) to distinguish wide roles from central ones. This ensures every player is evaluated against an *Above-Replacement* baseline anchored to their true positional peers.
 
 ---
 
@@ -65,19 +65,24 @@ Captures where the pressure is originating from relative to the opponent's goal 
 ### 3.5 Voronoi Area ($A_{vor}$)
 We compute the Voronoi tessellation of all players on the pitch, clipping the resultant polygons to the configured pitch boundaries (e.g., 120x80 yards). If edge cases occur (e.g., perfect collinearity, fewer than 4 players in frame), the system falls back to a statistically rigorous grid-based approximation. $A_{vor}$ is the area of the cell containing the ball-carrier — the raw square footage of grass the ball-carrier controls outright before facing an immediate tackle.
 
-### 3.6 Pitch Coordinates ($bc_x$, $bc_y$)
-The ball-carrier's raw pitch coordinates are included as continuous features. Earlier implementations encoded location as a single ordinal zone integer (e.g., zone = zone_x × 4 + zone_y), which imposed a false linear ordering — zone 12 was treated as "4× worse" than zone 3. Raw `bc_x` and `bc_y` are fed directly to the scaler, allowing the model to learn the non-linear pitch geography alongside the xT feature which already captures spatial value.
+### 3.6 B-Spline Pitch Coordinates ($bc_x$, $bc_y$, $d_{min}$)
+The ball-carrier's pitch coordinates and distance to the nearest opponent are mapped through cubic B-spline basis functions before entering the model. Earlier implementations encoded location as an ordinal zone integer, which imposed a false linear ordering. The raw coordinate was later used directly, but a linear scaler still cannot capture the highly non-linear value gradients on a football pitch (e.g., the steep xT gradient in front of goal, or the qualitatively different pressure dynamics at the touchline).
+
+Using scikit-learn's `SplineTransformer` with $n_{\text{knots}} = 5$, $\text{degree} = 3$, and `extrapolation="constant"`, each of the three raw features ($bc_x$, $bc_y$, $d_{\text{min}}$) is expanded into **6 B-spline basis columns** ($(n_{\text{knots}} - 1) + \text{degree} - 1$ basis functions with `include_bias=False`). The transformers are fitted on the training split, saved alongside the StandardScaler, and applied identically to the holdout set to prevent data leakage. This yields 18 additional model columns that flexibly capture non-linear pitch geography without requiring the practitioner to hand-engineer interaction terms.
 
 ### 3.7 Match Context Features
-Three non-spatial contextual features are appended to the feature vector from the match event data:
+Six non-spatial contextual features are appended to the feature vector from the match event stream:
 
 | Feature | Source | Semantics |
 |---------|---------|-----------|
 | `game_state_diff` | Goal tracking (Shot + Own Goal events) | Score differential at event time from ball-carrier's team perspective. Captures clutch-pressure effects and game management behaviour. |
 | `minutes_elapsed` | Event `minute` field | Enables the model to learn fatigue and time-pressure effects. |
 | `match_period` | Event `period` field | Accounts for structural differences between match periods, including extra time when present. |
+| `counter_press` | Pressure event `counterpress` flag | Binary indicator whether the pressure was part of an organised counter-press sequence. Counter-pressing events create qualitatively higher cognitive load and time constraints. |
+| `pass_height_ground` | Pass event `pass.height.id == 1` | Binary indicator for ground-level passes (StatsBomb ID 1). |
+| `pass_height_low` / `pass_height_high` | `pass.height.id == 2 / 3` | Binary indicators for low (lofted) and high (aerial) pass trajectories. Pass height strongly mediates the technical execution difficulty under pressure. |
 
-`game_state_diff` is computed by scanning events chronologically and tracking goals via `type == 'Shot'` with `shot_outcome == 'Goal'` and `type == 'Own Goal For'` events. The differential is recorded *before* each event is processed, ensuring no lookahead leakage.
+`game_state_diff` is computed by scanning events chronologically and tracking goals via `type == 'Shot'` with `shot_outcome == 'Goal'` and `type == 'Own Goal For'` events. The differential is recorded *before* each event is processed, ensuring no lookahead leakage. The three pass-height columns form a one-hot encoding of the pass height category; non-pass events receive all-zero encodings.
 
 ---
 
@@ -85,10 +90,12 @@ Three non-spatial contextual features are appended to the feature vector from th
 
 To solve the Zero-Inflation problem and the Safe-Pass bias simultaneously, we split the evaluation into two distinct targets:
 
-1. **$Y_{success}$:** A binary variable ($1$ if possession is retained, $0$ if dispossessed). The logic traces up to exactly 5 subsequent actions (`carry_lookahead_events`) to verify true possession retention — recognising a `Foul Committed` event by the *opposing* team (i.e. a foul won by the carrier) as success, and correctly attributing opponent actions (`Pass`, `Carry`, `Shot`, `Clearance`, `Interception`, `Dispossessed`) as failures. Note: StatsBomb does not emit a `Foul Won` event type; the corresponding signal is `Foul Committed` logged under the opposing team's `team_id`.
-2. **$V_{intended}$:** The Expected Threat (xT) value of the *intended* action, measured continuously using the Karun Singh 8×12 xT grid. For passes, it measures the xT at the destination coordinate. For carries and dribbles, it evaluates the location of the next action in the sequence. In the implementation, this quantity is stored as the `value_preserved` column in the processed dataset.
+1. **$Y_{success}$:** A binary variable ($1$ if possession is retained, $0$ if dispossessed). The logic traces up to exactly 5 subsequent actions (`carry_lookahead_events`) to verify true possession retention — recognising a `Foul Committed` event by the *opposing* team (i.e. a foul won by the carrier) as success, and correctly attributing opponent actions (`Pass`, `Carry`, `Shot`, `Clearance`, `Interception`, `Dispossessed`) as failures. StatsBomb does not emit a `Foul Won` event type; the corresponding signal is `Foul Committed` logged under the opposing team's `team_id`.
+2. **$V_{intended}$:** The value of the *intended* action, stored as the `value_preserved` column in the processed dataset. The framework supports two interchangeable value signals:
+   - **VAEP (primary):** When pre-trained LightGBM classifiers are available, the value is computed as $\text{VAEP} = (P_{\text{score,after}} - P_{\text{score,before}}) - (P_{\text{concede,after}} - P_{\text{concede,before}})$, implementing Decroos et al. (2019). Two classifiers — one for $P(\text{score in next } n \text{ actions})$ and one for $P(\text{concede in next } n \text{ actions})$ — are trained on all available StatsBomb events with a lookahead window of $n = 10$ actions. VAEP accounts for both the offensive threat created and the defensive risk introduced by the action, resolving a key limitation of unidirectional xT.
+   - **xT (fallback):** When VAEP models are not available, the framework falls back to the Karun Singh 8×12 Expected Threat grid. For passes, it evaluates xT at the destination coordinate; for carries and dribbles, at the location of the next action in the sequence.
 
-For the Beta distribution component of our model, $V_{intended}$ is scaled to the open interval $(0, 1)$ using a theoretical maximum value $V_{max}$ and a microscopic smoothing factor $\epsilon = 10^{-6}$:
+For the Beta distribution component of the model, $V_{intended}$ is scaled to the open interval $(0, 1)$ using a theoretical maximum value $V_{max}$ and a smoothing factor $\epsilon = 10^{-6}$:
 $$ V_{scaled} = \left( \frac{V_{intended}}{V_{max}} \right) (1 - 2\epsilon) + \epsilon $$
 
 ---
@@ -106,26 +113,37 @@ The model strictly separates the prediction space into two sequential hurdles:
    The concentration parameter $\kappa \sim \text{Exponential}(0.1)$ gives a prior mean of 10, appropriate for Beta regression on bounded xT values. A mean of 1 (the default Exponential(1.0)) would force extreme bimodal distributions and cause numerical instability.
 
 ### 5.2 The Linear Predictors
-Both sub-models utilize a parallel hierarchical linear structure linked via the inverse-logit function:
-$$ \text{logit}(p_i) = \alpha_{succ} + X_i \beta_{succ} + \gamma_{pos, succ} + \theta_{player, succ} + \delta_{opp, succ} + \zeta_{comp, succ} $$
-$$ \text{logit}(\mu_i) = \alpha_{val} + X_i \beta_{val} + \gamma_{pos, val} + \theta_{player, val} + \delta_{opp, val} + \zeta_{comp, val} $$
+Both sub-models utilise a parallel hierarchical linear structure linked via the inverse-logit function:
+$$ \text{logit}(p_i) = \alpha_{succ} + X_i \beta_{succ} + \gamma_{pos, succ} + \theta_{player, succ} + \delta_{opp, succ} + \zeta_{comp, succ} + \eta_{team, succ} $$
+$$ \text{logit}(\mu_i) = \alpha_{val} + X_i \beta_{val} + \gamma_{pos, val} + \theta_{player, val} + \delta_{opp, val} + \zeta_{comp, val} + \eta_{team, val} $$
 
 Where:
 * **$\theta_{player, succ}$:** The player's intrinsic *Ball Security* trait (resistance to being tackled or forcing an error).
 * **$\theta_{player, val}$:** The player's intrinsic *Value Retention* trait (ability to spot and execute dangerous passes despite pressure).
-* $X_i \beta$: The dot product of the standardised feature vector (spatial + contextual), establishing the mathematical difficulty of the specific situation.
-* $\gamma_{pos}$: Fixed effect for the player's position group — the replacement-level baseline within their tactical role.
+* $X_i \beta$: The dot product of the standardised feature vector (spatial + contextual + B-spline expansions), establishing the mathematical difficulty of the specific situation.
+* $\gamma_{pos}$: Fixed effect for the player's position group (CB / FB / DM / CM / W / CF) — the replacement-level baseline within their tactical role.
 * $\delta_{opp}$: Random effect capturing the specific defensive intensity of the opposing team.
 * $\zeta_{comp}$: Random effect capturing the tactical ecosystem and competitive standard of the competition.
+* **$\eta_{team}$:** Random effect for the ball-carrier's own attacking team, capturing systematic offensive style (e.g. high-press, possession-dominant teams generate a different distribution of pressure situations than reactive counter-attacking sides).
 
-### 5.3 Priors and Non-Centered Parameterization
-We enforce weakly informative Normal priors to provide regularization (shrinkage), preventing the model from overfitting players with small sample sizes (e.g., a youth player who succeeds in 2 out of 2 duels will be shrunk heavily toward the mean).
+### 5.3 Priors and Non-Centered Parameterisation
+Weakly informative Normal priors are enforced throughout to provide regularisation (shrinkage), preventing the model from overfitting players with small sample sizes (e.g., a player who succeeds in 2 out of 2 duels will be shrunk heavily toward the positional mean).
 
-To optimize the Hamiltonian Monte Carlo sampler and navigate the complex geometric funnels of hierarchical models, we utilize **non-centered parameterizations** for all random effects. For example, rather than sampling $\theta$ directly from $\mathcal{N}(0, \sigma)$, we sample a raw standard normal and multiply it by the standard deviation:
+All random effects use **non-centered parameterisations** to allow the HMC sampler to navigate the complex funnel geometries that arise in hierarchical models. Rather than sampling $\theta$ directly from $\mathcal{N}(0, \sigma)$, we sample a raw standard normal offset and scale it:
 $$ \tilde{\theta}_{player} \sim \mathcal{N}(0, 1) $$
 $$ \sigma_\theta \sim \text{Exponential}(1.0) $$
 $$ \theta_{player} = \tilde{\theta}_{player} \times \sigma_\theta $$
-This allows the PyMC sampler to explore the posterior landscape with maximum efficiency, avoiding divergent transitions.
+
+#### Correlated Player Traits — LKJ Cholesky Prior
+Because *Ball Security* ($\theta_{succ}$) and *Value Retention* ($\theta_{val}$) are cognitively related skills, they are modelled jointly as a bivariate Gaussian with a learnt covariance structure rather than as two independent scalars. The prior is specified via the LKJ distribution over correlation matrices (Lewandowski, Kurowicka & Joe, 2009):
+
+$$ \begin{pmatrix} \tilde{\theta}_{succ,i} \\ \tilde{\theta}_{val,i} \end{pmatrix} \sim \mathcal{N}(0, I_{2}) \quad \text{(raw offsets)} $$
+$$ \mathbf{L} \sim \text{LKJCholeskyCov}(\eta = 2,\; \sigma \sim \text{Exponential}(1.0)) $$
+$$ \begin{pmatrix} \theta_{succ,i} \\ \theta_{val,i} \end{pmatrix} = \mathbf{L}\, \tilde{\theta}_i $$
+
+The LKJ($\eta = 2$) prior places mild regularising pressure toward near-zero off-diagonal correlations, avoiding the degenerate case where the sampler collapses to a rank-1 solution. The posterior correlation $\rho_{\theta}$ is saved as a named deterministic variable and provides a direct quantitative estimate of the degree to which composure (ball security) and creativity (value retention) co-vary across the population.
+
+The sampler thereby explores a shared low-dimensional manifold for each player, yielding more efficient MCMC mixing and stronger regularisation for players with sparse observations.
 
 ---
 
@@ -155,19 +173,29 @@ We then subtract the positional population baseline (what an average player in t
 
 ---
 
-## 7. Validation Strategy: Out-of-Sample Residual Correlation
+## 7. Validation Strategy: Out-of-Sample Residual Correlation & Calibration
 
-Evaluating performance via in-sample loss functions (like AUC or RMSE on the training set) is insufficient for assessing whether a metric represents a scoutable, intrinsic player trait rather than statistical noise. The PRS utilizes **Out-of-Sample Expected Value Residual Correlation**, a strong validation pattern in sports analytics.
+Evaluating performance via in-sample loss functions (like AUC or RMSE on the training set) is insufficient for assessing whether a metric represents a scoutable, intrinsic player trait rather than statistical noise. The PRS employs two complementary out-of-sample validation protocols.
 
-1. **Prediction Generation:** The Hurdle model is trained on a massive, diverse set of competitions (e.g., Euro 2024, World Cup 2022).
-2. **Holdout Evaluation:** A completely separate competition with a distinct tactical ecosystem (e.g., Euro 2020) is withheld. For every carrier action under pressure $j$ in the holdout set, we calculate the expected value generated by an *average* player in that exact spatial geometry using fully vectorized tensor operations:
-   $$ \hat{V}_j = p_{baseline, j} \times \mu_{baseline, j} \times V_{max} $$
-3. **Residual Aggregation:** We calculate the true value generated *above expected* for that specific event:
+### 7.1 Expected Value Residual Correlation
+
+1. **Prediction Generation:** The Hurdle model is trained on a diverse set of competitions (e.g., Euro 2024, World Cup 2022, Copa América 2024).
+2. **Holdout Evaluation:** A completely separate competition is withheld. The specific holdout is controlled by the `PRS_HOLDOUT` environment variable (default: `Euro_2020`). For every carrier action under pressure $j$ in the holdout set, we calculate the expected value generated by an *average* player in that exact spatial geometry using fully vectorised posterior predictive operations. Opponent and competition random effects are marginalised to zero (their prior mean under the non-centered parameterisation), which is the principled choice for unseen groups:
+   $$ \hat{V}_j = \sigma(\hat{\eta}_{succ, j}) \times \sigma(\hat{\eta}_{val, j}) \times V_{max} $$
+3. **Residual Aggregation:** We calculate the value generated *above expected* for each event:
    $$ r_j = V_{true, j} - \hat{V}_j $$
-   *(A positive residual means the player achieved an outcome better than the mathematical difficulty of the situation suggested).*
-4. **Correlation:** We average the residuals per player across their season in the holdout dataset ($\bar{r}_{player}$) and correlate this with their *training* PRS ($\theta_{player}$) derived from the entirely separate training dataset.
+   A positive residual indicates the player achieved an outcome better than the mathematical difficulty of the situation.
+4. **Correlation:** Residuals are averaged per player ($\bar{r}_{player}$) and correlated with their *training* PRS via both Pearson and Spearman statistics.
 
-A significant positive Pearson correlation is evidence that the two $\theta$ traits extracted by the model capture stable, persistent cognitive and technical traits. It supports the claim that composure under pressure is not merely random variance, but a measurable skill that can transfer across different tactical environments, leagues, and tournaments.
+A significant positive Pearson correlation is evidence that the two $\theta$ traits extracted by the model capture stable, persistent cognitive and technical traits — composure under pressure is not merely random variance but a measurable, transferable skill.
+
+### 7.2 Calibration Assessment (ECE)
+
+Beyond rank-order correlation, we assess the absolute reliability of the Ball Security probability estimates using the **Expected Calibration Error (ECE)**:
+$$ \text{ECE} = \frac{1}{B} \sum_{b=1}^{B} \left| \bar{y}_b - \bar{p}_b \right| $$
+where events are partitioned into $B = 10$ equal-width bins by predicted probability, $\bar{p}_b$ is the mean predicted probability in bin $b$, and $\bar{y}_b$ is the empirical success rate. A reliability curve (predicted vs. observed probability) is generated for each holdout run and saved as `calibration_curve_{holdout}.csv`. A well-calibrated model has ECE close to zero and a reliability curve close to the diagonal.
+
+The holdout AUC for binary ball-security prediction and ECE are both reported in `holdout_metrics_{holdout}.csv`.
 
 ---
 
@@ -181,8 +209,8 @@ The model trains on 4 international tournaments from the StatsBomb Open Data cat
 ### 8.2 Composure as a Stable Trait
 The hierarchical model assumes that a player's latent composure ($\theta_i$) is a time-invariant trait — the same in minute 5 and minute 85, across a group-stage dead rubber and a semi-final. In reality, composure is likely form-dependent (injury, confidence) and context-dependent (home vs away, scoreline, tournament stage). The `game_state_diff` and `minutes_elapsed` features partially control for within-match variation, but they do not model time-varying player effects. A state-space extension (random walk on $\theta_i$ across matches) would address this at the cost of computational complexity.
 
-### 8.3 Expected Threat (xT) Grid Resolution
-The xT grid used to value actions is an $8 \times 12$ discrete grid (Karun Singh, 2019), giving each cell a coverage of $\approx 15 \times 7$ yards. This is sufficient for open-play possession sequences but introduces quantisation error when evaluating short-distance actions (carries of 3–5 yards, lateral passes). Actions that start and end within the same cell receive $\Delta xT = 0$, undervaluing subtle positional improvements. A higher-resolution model (e.g., $16 \times 24$ or a continuous xT surface fitted via gradient boosting) would improve granularity, at the cost of requiring more training data to populate the surface reliably.
+### 8.3 Action-Value Resolution
+When the VAEP models are available (the default for full training runs), the value signal accounts for the full sequence of subsequent actions up to a lookahead window of 10 events, resolving the static cell-boundary problem inherent to xT grids. The xT fallback uses the Karun Singh 8×12 discrete grid, giving each cell a coverage of $\approx 15 \times 7$ yards. Actions that start and end within the same cell receive $\Delta xT = 0$, undervaluing subtle positional improvements. When using the xT fallback, a higher-resolution surface (e.g., $16 \times 24$ or a continuous gradient-boosted surface) would reduce quantisation error at the cost of requiring additional training data to populate reliably.
 
 ### 8.4 Angular Coverage Approximation
 The `coverage_arc` feature uses a body-width trigonometric projection to estimate how much of the carrier's angular field of view is blocked by opponents. For multi-opponent scenarios, the implementation assumes opponents are non-overlapping angular sources. When opponents are very close together (< 1 yard apart), their individual body-width arcs may overlap, leading to a slight overestimate of coverage. Additionally, the model does not account for opponent height, approach speed, or body orientation, all of which influence the perceived pressure in practice.
