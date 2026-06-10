@@ -87,7 +87,7 @@ class TestComputeIntendedXt:
 
 class TestRecentPressures:
     def test_recent_pressures_rolling_count(self):
-        from src.data.events import _process_single_match
+        from src.data.events import process_single_match
 
         # Carrier events (Pass/Carry/Dribble) in chronological order
         # for player_id="p1", with pressures paired on e1, e3, e5.
@@ -140,7 +140,7 @@ class TestRecentPressures:
         position_groups = {'p1': 'Midfielder'}
 
         args = (100, events, frames, gk_ids, position_groups, 'Test_Comp')
-        rows = _process_single_match(args)
+        rows = process_single_match(args)
 
         rp_by_id = {r['ball_carrier_event_id']: r['recent_pressures'] for r in rows}
 

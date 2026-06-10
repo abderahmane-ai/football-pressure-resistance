@@ -16,18 +16,14 @@ from config import (
     PROCESSED_DATA_DIR,
 )
 from src.data.events import (
-    _process_single_match,
-)
-from src.data.events import (
-    compute_game_state_for_match as compute_game_state_for_match,
-)
-from src.data.events import (
-    compute_intended_xt as compute_intended_xt,
+    process_single_match,
+    compute_game_state_for_match,
+    compute_intended_xt,
 )
 
 # Import sub-modules for builder logic and expose them for backward compatibility
 from src.data.lineups import (
-    _fetch_lineups,
+    fetch_lineups,
     get_goalkeeper_ids_from_lineups,
     get_player_position_groups_from_lineups,
 )
@@ -38,8 +34,8 @@ from src.data.validation import (
     validate_statsbomb_frames,
 )
 from src.data.writer import (
-    _dataframe_hash,
-    _save_parquet_with_metadata,
+    dataframe_hash,
+    save_parquet_with_metadata,
 )
 
 logger = logging.getLogger(__name__)
@@ -56,10 +52,10 @@ def build_all_datasets(include_holdout: bool = False) -> pd.DataFrame | None:
     # is unchanged, the processed dataset is byte-equivalent and rebuilding
     # it costs 15-30 min for no gain.
     out_file = PROCESSED_DATA_DIR / f"all_pressure_dataset_{CROSS_VALIDATION_HOLDOUT}.parquet"
-    if out_file.exists() and not os.environ.get("FORCE_REBUILD_DATA", "") == "1":
+    if out_file.exists() and not os.environ.get("PRS_FORCE_REBUILD_DATA", "") == "1":
         logger.info(
             "Found cached training dataset at %s. Skipping rebuild "
-            "(set FORCE_REBUILD_DATA=1 to override).",
+            "(set PRS_FORCE_REBUILD_DATA=1 to override).",
             out_file,
         )
         return pd.read_parquet(out_file)
@@ -88,7 +84,7 @@ def build_all_datasets(include_holdout: bool = False) -> pd.DataFrame | None:
         # Pre-fetch lineup data ONCE per match
         lineups_by_match: dict[int, dict[str, pd.DataFrame]] = {}
         with ThreadPoolExecutor(max_workers=N_WORKERS) as ex:
-            futures = {ex.submit(_fetch_lineups, mid): mid for mid in match_ids}
+            futures = {ex.submit(fetch_lineups, mid): mid for mid in match_ids}
             for fut in tqdm(futures, desc=f"Loading lineups ({comp_name})"):
                 lineups_by_match[futures[fut]] = fut.result()
 
@@ -117,7 +113,7 @@ def build_all_datasets(include_holdout: bool = False) -> pd.DataFrame | None:
         comp_events = 0
         with ThreadPoolExecutor(max_workers=N_WORKERS) as ex:
             for batch in tqdm(
-                ex.map(_process_single_match, worker_args),
+                ex.map(process_single_match, worker_args),
                 total=len(worker_args),
                 desc=f"Processing matches ({comp_name})",
             ):
@@ -133,8 +129,8 @@ def build_all_datasets(include_holdout: bool = False) -> pd.DataFrame | None:
         PROCESSED_DATA_DIR.mkdir(parents=True, exist_ok=True)
         # Key the training dataset by holdout so the 4-fold CV cache survives
         # across folds without overwriting an in-use file.
-        source_hash = _dataframe_hash(dataset_df)
-        _save_parquet_with_metadata(
+        source_hash = dataframe_hash(dataset_df)
+        save_parquet_with_metadata(
             dataset_df,
             out_file,
             source_hash=source_hash,
@@ -155,10 +151,10 @@ def build_holdout_dataset() -> None:
 
     PROCESSED_DATA_DIR.mkdir(parents=True, exist_ok=True)
     out_file = PROCESSED_DATA_DIR / f"holdout_pressure_dataset_{CROSS_VALIDATION_HOLDOUT}.parquet"
-    if out_file.exists() and not os.environ.get("FORCE_REBUILD_DATA", "") == "1":
+    if out_file.exists() and not os.environ.get("PRS_FORCE_REBUILD_DATA", "") == "1":
         logger.info(
             "Found cached holdout dataset at %s. Skipping rebuild "
-            "(set FORCE_REBUILD_DATA=1 to override).",
+            "(set PRS_FORCE_REBUILD_DATA=1 to override).",
             out_file,
         )
         return
@@ -180,7 +176,7 @@ def build_holdout_dataset() -> None:
         # Single lineups fetch per match
         lineups_by_match: dict[int, dict[str, pd.DataFrame]] = {}
         with ThreadPoolExecutor(max_workers=N_WORKERS) as ex:
-            futures = {ex.submit(_fetch_lineups, mid): mid for mid in match_ids}
+            futures = {ex.submit(fetch_lineups, mid): mid for mid in match_ids}
             for fut in tqdm(futures, desc="Loading holdout lineups"):
                 lineups_by_match[futures[fut]] = fut.result()
 
@@ -207,7 +203,7 @@ def build_holdout_dataset() -> None:
 
         with ThreadPoolExecutor(max_workers=N_WORKERS) as ex:
             for batch in tqdm(
-                ex.map(_process_single_match, worker_args),
+                ex.map(process_single_match, worker_args),
                 total=len(worker_args),
                 desc="Processing holdout matches",
             ):
@@ -216,8 +212,8 @@ def build_holdout_dataset() -> None:
     if all_processed_data:
         dataset_df = pd.DataFrame(all_processed_data)
         validate_model_dataset(dataset_df, MODEL_FEATURE_COLUMNS, context="holdout pressure dataset")
-        source_hash = _dataframe_hash(dataset_df)
-        _save_parquet_with_metadata(
+        source_hash = dataframe_hash(dataset_df)
+        save_parquet_with_metadata(
             dataset_df,
             out_file,
             source_hash=source_hash,

@@ -14,12 +14,12 @@ from src.data.pairing import pair_pressure_with_ball_carrier
 from src.features.geometry import xt_value
 from src.features.spatial import extract_spatial_features_from_frame
 
-_VAEP_CACHE: dict[int, dict[str, float]] = {}
-_HAS_VAEP: bool = True
+_vaep_cache: dict[int, dict[str, float]] = {}
+_has_vaep: bool = True
 try:
     from src.features.vaep import compute_vaep
 except ImportError:
-    _HAS_VAEP = False
+    _has_vaep = False
     compute_vaep = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
@@ -97,8 +97,8 @@ def compute_intended_xt(
 
     # Try VAEP first (cached per match)
     match_id = item.get("match_id")
-    if match_id is not None and match_id in _VAEP_CACHE:
-        return _VAEP_CACHE[match_id].get(bc_event_id)
+    if match_id is not None and match_id in _vaep_cache:
+        return _vaep_cache[match_id].get(bc_event_id)
 
     # Fall back to xT
     if id_to_idx is not None and (match_events_list is not None or not match_events.empty):
@@ -173,7 +173,7 @@ def compute_intended_xt(
     return float(next_xt)
 
 
-def _process_single_match(
+def process_single_match(
     args: tuple[int, pd.DataFrame, pd.DataFrame, set[int], dict[Any, str], str],
 ) -> list[dict[str, Any]]:
     """
@@ -219,12 +219,12 @@ def _process_single_match(
             )
 
         # Pre-compute VAEP for all events in this match (cached for O(1) lookup)
-        if _HAS_VAEP and compute_vaep is not None:
+        if _has_vaep and compute_vaep is not None:
             try:
                 vaep_values = compute_vaep(match_events)
                 if vaep_values is not None and "id" in match_events.columns:
                     match_vaep = dict(zip(match_events["id"], vaep_values))
-                    _VAEP_CACHE[match_id] = match_vaep
+                    _vaep_cache[match_id] = match_vaep
             except Exception:
                 logger.debug("VAEP computation failed for match %d, falling back to xT", match_id)
 

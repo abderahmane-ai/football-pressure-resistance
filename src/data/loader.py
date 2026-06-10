@@ -55,7 +55,7 @@ def load_competition_events(comp_id: int, season_id: int) -> pd.DataFrame:
                 description=f"events(match {match_id})",
             )
             events["match_id"] = match_id
-            # pyrefly: ignore [bad-argument-type]
+            # type: ignore[arg-type]
             all_events.append(events)
         except Exception as e:
             logger.warning(

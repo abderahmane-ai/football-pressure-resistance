@@ -96,8 +96,12 @@ To solve the Zero-Inflation problem and the Safe-Pass bias simultaneously, we sp
    - **VAEP (primary):** When pre-trained LightGBM classifiers are available, the value is computed as $\text{VAEP} = (P_{\text{score,after}} - P_{\text{score,before}}) - (P_{\text{concede,after}} - P_{\text{concede,before}})$, implementing Decroos et al. (2019). Two classifiers — one for $P(\text{score in next } n \text{ actions})$ and one for $P(\text{concede in next } n \text{ actions})$ — are trained on all available StatsBomb events with a lookahead window of $n = 10$ actions. VAEP accounts for both the offensive threat created and the defensive risk introduced by the action, resolving a key limitation of unidirectional xT.
    - **xT (fallback):** When VAEP models are not available, the framework falls back to the Karun Singh 8×12 Expected Threat grid. For passes, it evaluates xT at the destination coordinate; for carries and dribbles, at the location of the next action in the sequence.
 
-For the Beta distribution component of the model, $V_{intended}$ is scaled to the open interval $(0, 1)$ using a theoretical maximum value $V_{max}$ and a smoothing factor $\epsilon = 10^{-6}$:
-$$ V_{scaled} = \left( \frac{V_{intended}}{V_{max}} \right) (1 - 2\epsilon) + \epsilon $$
+Because VAEP values can be negative (an action that increases conceding probability more than scoring probability), the raw values are shifted to be non-negative before Beta scaling:
+$$ V_{shifted} = V_{intended} - V_{min} $$
+These shifted values are then scaled to the open interval $(0, 1)$ using a theoretical maximum value $V_{max}$ and a smoothing factor $\epsilon = 10^{-6}$:
+$$ V_{scaled} = \left( \frac{V_{shifted}}{V_{max}} \right) (1 - 2\epsilon) + \epsilon $$
+The inverse transform (used during inference and validation) applies the reverse:
+$$ \mu_{original} = \text{logit}^{-1}(\eta_{val}) \times V_{max} + V_{min} $$
 
 ---
 
@@ -164,11 +168,12 @@ The sampler thereby explores a shared low-dimensional manifold for each player, 
 A black-box model is useless for elite football scouting. The PRS framework provides explicit, geometric interpretability.
 
 ### 6.1 Covariance-Aware Variance Decomposition
-To understand which components drive outcome variance, we decompose the total variance of the linear predictor into four distinct sources for each sub-model:
+To understand which components drive outcome variance, we decompose the total variance of the linear predictor into five distinct sources for each sub-model:
 
 | Component | Estimator |
 |-----------|----------|
 | **Player Skill** | $\mathbb{E}[\sigma_\theta^2]$ (posterior mean of squared player SD) |
+| **Team Style** | $\mathbb{E}[\sigma_{team}^2]$ |
 | **Opponent Quality** | $\mathbb{E}[\sigma_{opp}^2]$ |
 | **Competition Context** | $\mathbb{E}[\sigma_{comp}^2]$ |
 | **Spatial Features** | $\mathbb{E}[\text{Var}(X\beta)]$ — true sample variance of linear predictor, accounting for multi-collinearity |

@@ -11,7 +11,7 @@ import pyarrow.parquet as pq
 from config import MODEL_FEATURE_COLUMNS
 
 
-def _dataframe_hash(df: pd.DataFrame) -> str:
+def dataframe_hash(df: pd.DataFrame) -> str:
     """Compute a stable SHA-256 digest of a DataFrame's content for provenance tracking.
 
     Only hashes head/tail samples + column names + shape.  Two DataFrames
@@ -32,7 +32,7 @@ def _dataframe_hash(df: pd.DataFrame) -> str:
     return h.hexdigest()
 
 
-def _save_parquet_with_metadata(
+def save_parquet_with_metadata(
     df: pd.DataFrame,
     path: str | os.PathLike[str],
     *,

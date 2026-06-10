@@ -71,7 +71,7 @@ Raises `DataValidationError` with actionable messages if contracts are violated.
 
 ---
 
-## Feature Vector (21 features)
+## Feature Vector (41 features)
 
 | Feature | Description |
 |---------|-------------|
@@ -96,6 +96,7 @@ Raises `DataValidationError` with actionable messages if contracts are violated.
 | `game_state_diff` | Score differential (carrier team − opponent) at event time |
 | `minutes_elapsed` | Match minute |
 | `match_period` | StatsBomb period number |
+| `recent_pressures` | Count of pressured touches in player's last 5 carrier events |
 | `counter_press` | Binary: 1.0 if the linked pressure was a counter-press event |
 | `pass_height_ground` | Binary: 1.0 if Pass height category is Ground |
 | `pass_height_low` | Binary: 1.0 if Pass height category is Low |
@@ -106,11 +107,11 @@ Raises `DataValidationError` with actionable messages if contracts are violated.
 ## Model Specification
 
 ### Ball Security (Logistic / Bernoulli)
-$$\text{logit}(p_i) = \alpha_{succ} + X_i\beta_{succ} + \gamma_{pos,succ} + \theta_{player,succ} + \delta_{opp,succ} + \zeta_{comp,succ} + \eta_{team,succ}$$
+$$\text{logit}(p_i) = \alpha_{succ} + X_{i,\text{global}}\beta_{\text{global},succ} + X_{i,\text{pos\_spec}}\beta_{\text{pos}[i],succ} + \gamma_{pos,succ} + \theta_{player,succ} + \delta_{opp,succ} + \zeta_{comp,succ} + \eta_{team,succ}$$
 $$Y_{success} \sim \text{Bernoulli}(p_i)$$
 
 ### Value Retention (Beta Regression, successes only)
-$$\text{logit}(\mu_i) = \alpha_{val} + X_i\beta_{val} + \gamma_{pos,val} + \theta_{player,val} + \delta_{opp,val} + \zeta_{comp,val} + \eta_{team,val}$$
+$$\text{logit}(\mu_i) = \alpha_{val} + X_{i,\text{global}}\beta_{\text{global},val} + X_{i,\text{pos\_spec}}\beta_{\text{pos}[i],val} + \gamma_{pos,val} + \theta_{player,val} + \delta_{opp,val} + \zeta_{comp,val} + \eta_{team,val}$$
 $$V_{scaled} \sim \text{Beta}(\mu_i \cdot \kappa,\ (1-\mu_i) \cdot \kappa), \quad \kappa \sim \text{Exponential}(0.1)$$
 
 ### Correlated Player Effects ($\theta_{player,succ}$, $\theta_{player,val}$)
@@ -141,7 +142,7 @@ pip install -r requirements.lock
 
 For hardware-accelerated MCMC (strongly recommended on Apple Silicon):
 ```bash
-pip install -e .[accelerated]
+pip install -e ".[accelerated]"
 pip install jax-metal        # Mac GPU backend
 ```
 
@@ -162,52 +163,36 @@ This runs the full pipeline (including VAEP model training, dataset building, Ba
 ### Option B — Single Run
 ```bash
 # 1. Train VAEP scoring and conceding LightGBM classifiers
-# macOS / Linux: python3 -m src.features.train_vaep
-# Windows:      python -m src.features.train_vaep
+python3 -m src.features.train_vaep
 
 # 2. Download, filter, and build feature dataset (parallelised)
-# macOS / Linux: python3 -m src.data.builder
-# Windows:      python -m src.data.builder
+python3 -m src.data.builder
 
 # 3. Fit hierarchical Hurdle model (MCMC)
-# macOS / Linux: python3 -m src.models.bayesian
-# Windows:      python -m src.models.bayesian
+python3 -m src.models.bayesian
 
 # 4. Extract leaderboard + scenario profiles
-# macOS / Linux: python3 -m src.models.inference
-# Windows:      python -m src.models.inference
+python3 -m src.models.inference
 
 # 5. Validate via out-of-sample residual correlation and ECE calibration
-# macOS / Linux: python3 -m src.models.validation
-# Windows:      python -m src.models.validation
+python3 -m src.models.validation
 
 # 6. Variance decomposition + marginal effects + SNR
-# macOS / Linux: python3 -m src.visualization.interpretability
-# Windows:      python -m src.visualization.interpretability
+python3 -m src.visualization.interpretability
 
 # 7. Generate publication figures (Calibration, Leaderboard, Coefficient spans)
-# macOS / Linux: python3 -m src.visualization.plots
-# Windows:      python -m src.visualization.plots
+python3 -m src.visualization.plots
 ```
 
 ### Holdout Competition
 Controlled via the `PRS_HOLDOUT` environment variable (default: `Euro_2020`). Must be set before running the full pipeline:
 ```bash
 export PRS_HOLDOUT=World_Cup_2022
-# macOS / Linux
 python3 -m src.features.train_vaep
 python3 -m src.data.builder
 python3 -m src.models.bayesian
 python3 -m src.models.inference
 python3 -m src.models.validation
-
-# Windows (PowerShell)
-$env:PRS_HOLDOUT="World_Cup_2022"
-python -m src.features.train_vaep
-python -m src.data.builder
-python -m src.models.bayesian
-python -m src.models.inference
-python -m src.models.validation
 ```
 
 ---
@@ -230,7 +215,7 @@ python -m src.models.validation
 
 | Path | Description |
 |------|-------------|
-| `outputs/tables/prs_leaderboard_{holdout}.csv` | Player Ball Security, Value Retention, PRS, HDI, best scenario (main aggregated copy at `prs_leaderboard.csv`) |
+| `outputs/tables/prs_leaderboard_{holdout}.csv` | Player Ball Security, Value Retention, PRS, HDI, best scenario |
 | `outputs/tables/feature_importance.csv` | Standardized β coefficients with 90% HDI for both sub-models |
 | `outputs/tables/variance_decomposition.csv` | Variance split: Player Skill / Team Style / Opp Quality / Competition / Spatial Features |
 | `outputs/tables/holdout_correlation_data_{holdout}.csv` | Per-player training PRS vs holdout residuals |
@@ -248,3 +233,5 @@ python -m src.models.validation
 | `outputs/figures/4_calibration.png` | Reliability diagram (Perfect vs Observed success probability) |
 | `outputs/figures/7_stability_scatter.png` | Training PRS vs holdout residuals |
 | `outputs/model_traces/pooled_trace_{holdout}.nc` | Full MCMC posterior (NetCDF) |
+| `outputs/model_traces/pooled_scaler_{holdout}.pkl` | Fitted StandardScaler + feature list + spline transformers + scaling constants |
+| `outputs/model_traces/pooled_mappings_{holdout}.pkl` | Player / position / competition / team index↔label mappings |

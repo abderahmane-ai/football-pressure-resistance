@@ -203,9 +203,9 @@ def fit_pooled_model() -> az.InferenceData | None:
     scaler_path: Path = MODEL_TRACES_DIR / f"pooled_scaler_{holdout}.pkl"
     mappings_path: Path = MODEL_TRACES_DIR / f"pooled_mappings_{holdout}.pkl"
 
-    if trace_path.exists() and not os.environ.get("FORCE_RETRAIN", "") == "1":
+    if trace_path.exists() and not os.environ.get("PRS_FORCE_RETRAIN", "") == "1":
         logger.info(
-            "Found existing trace at %s. Skipping MCMC (set FORCE_RETRAIN=1 to override).",
+            "Found existing trace at %s. Skipping MCMC (set PRS_FORCE_RETRAIN=1 to override).",
             trace_path,
         )
         return az.from_netcdf(str(trace_path))  # type: ignore[no-any-return]
@@ -285,15 +285,15 @@ def fit_pooled_model() -> az.InferenceData | None:
     team_cats = df["team_id"].astype("category")
     pos_cats = df["position_group"].astype("category")
 
-    # pyrefly: ignore [bad-assignment]
+    # type: ignore[assignment]
     player_idx: np.ndarray = player_cats.cat.codes.values
-    # pyrefly: ignore [bad-assignment]
+    # type: ignore[assignment]
     comp_idx: np.ndarray = comp_cats.cat.codes.values
-    # pyrefly: ignore [bad-assignment]
+    # type: ignore[assignment]
     opp_idx: np.ndarray = opp_team_cats.cat.codes.values
-    # pyrefly: ignore [bad-assignment]
+    # type: ignore[assignment]
     team_idx: np.ndarray = team_cats.cat.codes.values
-    # pyrefly: ignore [bad-assignment]
+    # type: ignore[assignment]
     pos_idx: np.ndarray = pos_cats.cat.codes.values
 
     n_players: int = len(player_cats.cat.categories)

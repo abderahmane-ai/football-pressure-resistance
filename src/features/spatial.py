@@ -158,7 +158,7 @@ def extract_spatial_features_from_frame(
         for tm in free_tms:
             tm_xt = xt_value(tm[0], tm[1])
             # Check if progressive (higher xT or strictly closer to goal line)
-            if tm_xt > bc_xt or tm[0] > bc[0] + 5.0:
+            if tm_xt > bc_xt or tm[0] > bc[0] + SPATIAL_CONFIG["progressive_distance"]:
                 if lane_unblocked(bc, tm, opps):  # type: ignore[arg-type]
                     features["has_progressive_option"] = 1
                     break

@@ -34,10 +34,12 @@ def main() -> None:
 
     # Skip if models already exist (VAEP is invariant to CV holdout)
     model_dir = Path(VAEP_CONFIG["model_dir"])  # type: ignore[arg-type]
-    if (model_dir / "vaep_score.pkl").exists() and (model_dir / "vaep_concede.pkl").exists():
-        if os.environ.get("FORCE_RETRAIN", "") != "1":
+    score_path = model_dir / "vaep_score.pkl"
+    concede_path = model_dir / "vaep_concede.pkl"
+    if score_path.exists() and concede_path.exists():
+        if os.environ.get("PRS_FORCE_RETRAIN", "") != "1":
             logger.info(
-                "VAEP models already exist at %s. Skipping (set FORCE_RETRAIN=1 to override).",
+                "VAEP models already exist at %s. Skipping (set PRS_FORCE_RETRAIN=1 to override).",
                 model_dir,
             )
             return

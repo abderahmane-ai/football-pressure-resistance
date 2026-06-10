@@ -44,7 +44,8 @@ def run_step(step_cmd: list[str], env: dict[str, str]) -> None:
         sys.exit(1)
 
 def main() -> None:
-    logger.info("Starting 4-Fold Cross Validation Pipeline")
+    n_folds = len(comps_to_run)
+    logger.info("Starting %d-Fold Cross Validation Pipeline", n_folds)
     check_optimization()
     python_cmd = get_python_cmd()
     logger.info("Using Python executable: %s", python_cmd)
@@ -65,7 +66,7 @@ def main() -> None:
     for holdout in comps_to_run:
         fold = COMPS.index(holdout)
         logger.info("%s", '=' * 60)
-        logger.info("FOLD %d/4: Holdout = %s", fold + 1, holdout)
+        logger.info("FOLD %d/%d: Holdout = %s", fold + 1, n_folds, holdout)
         logger.info("%s", '=' * 60)
 
         env = os.environ.copy()
@@ -73,11 +74,11 @@ def main() -> None:
 
         # Check if trace already exists on the persistent volume to avoid rerunning MCMC (55 min/fold)
         trace_file = MODEL_TRACES_DIR / f"pooled_trace_{holdout}.nc"
-        if trace_file.exists() and os.environ.get("FORCE_RETRAIN", "") != "1":
+        if trace_file.exists() and os.environ.get("PRS_FORCE_RETRAIN", "") != "1":
             logger.info("Trace for %s already exists at %s. Skipping MCMC sampling for this fold.", holdout, trace_file)
-            env["FORCE_RETRAIN"] = "0"
+            env["PRS_FORCE_RETRAIN"] = "0"
         else:
-            env["FORCE_RETRAIN"] = "1"
+            env["PRS_FORCE_RETRAIN"] = "1"
 
 
         steps = [

@@ -12,7 +12,7 @@ from config import SPATIAL_CONFIG
 logger = logging.getLogger(__name__)
 
 
-def _fetch_lineups(match_id: int) -> dict[str, pd.DataFrame]:
+def fetch_lineups(match_id: int) -> dict[str, pd.DataFrame]:
     """Fetch lineups for a match, returning an empty dict on failure."""
     try:
         return sb.lineups(match_id=match_id)  # type: ignore[no-any-return]
@@ -44,7 +44,7 @@ def get_player_position_groups_from_lineups(
     match_events: pd.DataFrame | None = None,
 ) -> dict[int, str]:
     """
-    Get position group (Defender/Midfielder/Forward) for each player.
+    Get position group (CB/FB/DM/CM/W/CF) for each player.
     Uses pre-fetched lineup data, and falls back to coordinate clustering
     if a player is missing from the lineups.
     """

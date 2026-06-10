@@ -30,8 +30,9 @@ except ImportError:
     lgb = None
 
 _VAEP_MODEL_DIR: Path = Path(cast(str, VAEP_CONFIG["model_dir"]))
-
 _VAEP_MODELS: tuple[Any, Any] | None = None
+_VAEP_SCORE_FILENAME: str = "vaep_score.pkl"
+_VAEP_CONCEDE_FILENAME: str = "vaep_concede.pkl"
 
 
 def _is_valid_loc(loc: Any) -> bool:
@@ -112,7 +113,7 @@ def _compute_labels(
     """For each event, label whether team scores or concedes within next *lookahead* actions.
 
     Returns DataFrame with ``scores_next`` and ``concedes_next`` binary columns,
-    plus match_id and event index for merging.
+    plus event id and match_id for merging.
     """
     if "index" in events.columns:
         events = events.sort_values(["match_id", "index"]).reset_index(drop=True)
@@ -177,8 +178,8 @@ def train_vaep_models(events: pd.DataFrame) -> tuple[Any, Any]:
     if not _HAS_ML_LIBS or lgb is None or joblib is None:
         raise ImportError("lightgbm and joblib are required to train VAEP models.")
     _VAEP_MODEL_DIR.mkdir(parents=True, exist_ok=True)
-    score_path = _VAEP_MODEL_DIR / "vaep_score.pkl"
-    concede_path = _VAEP_MODEL_DIR / "vaep_concede.pkl"
+    score_path = _VAEP_MODEL_DIR / _VAEP_SCORE_FILENAME
+    concede_path = _VAEP_MODEL_DIR / _VAEP_CONCEDE_FILENAME
 
     logger.info("Extracting state features for VAEP training...")
     features = _extract_state_features(events)
@@ -240,8 +241,8 @@ def load_vaep_models() -> tuple[Any, Any] | None:
         return _VAEP_MODELS
     if not _HAS_ML_LIBS or joblib is None:
         return None
-    score_path = _VAEP_MODEL_DIR / "vaep_score.pkl"
-    concede_path = _VAEP_MODEL_DIR / "vaep_concede.pkl"
+    score_path = _VAEP_MODEL_DIR / _VAEP_SCORE_FILENAME
+    concede_path = _VAEP_MODEL_DIR / _VAEP_CONCEDE_FILENAME
     if not score_path.exists() or not concede_path.exists():
         logger.warning(
             "VAEP models not found at %s. Run train_vaep_models() first.",

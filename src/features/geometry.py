@@ -62,7 +62,9 @@ def point_in_pitch(x: float, y: float) -> bool:
     return 0 <= x <= SPATIAL_CONFIG["pitch_length"] and 0 <= y <= SPATIAL_CONFIG["pitch_width"]
 
 
-def _gaussian_influence(point: np.ndarray, players: Sequence[object], max_radius: float = 15.0) -> float:
+def _gaussian_influence(point: np.ndarray, players: Sequence[object], max_radius: float | None = None) -> float:
+    if max_radius is None:
+        max_radius = SPATIAL_CONFIG["pitch_control_max_radius"]
     """Compute Gaussian influence of a list of players at a specific point."""
     if len(players) == 0:
         return 0.0
@@ -129,18 +131,18 @@ def voronoi_area(ball_carrier: Sequence[float], all_players: list[Sequence[float
     if len(points) < 4:
         return _grid_voronoi_area(ball_carrier, all_players)
 
-    mp = MultiPoint(points)  # pyrefly: ignore [bad-argument-type]
+    mp = MultiPoint(points)  # type: ignore[arg-type]
 
     try:
         regions = voronoi_diagram(mp, envelope=pitch_polygon)
     except Exception:
         return _grid_voronoi_area(ball_carrier, all_players)
 
-    bc_point = Point(ball_carrier)  # pyrefly: ignore [bad-argument-type]
+    bc_point = Point(ball_carrier)  # type: ignore[arg-type]
     for polygon in regions.geoms:
         if polygon.contains(bc_point):
             clipped = polygon.intersection(pitch_polygon)
-            # pyrefly: ignore [unnecessary-type-conversion]
+            # type: ignore[unnecessary-cast]
             return float(clipped.area)
 
     return 0.0
@@ -260,8 +262,8 @@ def lane_unblocked(
     if len(opponents) == 0:
         return True
 
-    lane = LineString([start_point, end_point])  # pyrefly: ignore [bad-argument-type]
+    lane = LineString([start_point, end_point])  # type: ignore[arg-type]
     for opp in opponents:
-        if lane.distance(Point(opp)) <= clearance_radius:  # pyrefly: ignore [bad-argument-type]
+        if lane.distance(Point(opp)) <= clearance_radius:  # type: ignore[arg-type]
             return False
     return True
