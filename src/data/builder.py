@@ -16,9 +16,6 @@ from config import (
     PROCESSED_DATA_DIR,
 )
 from src.data.events import (
-    _is_valid_loc as _is_valid_loc,
-)
-from src.data.events import (
     _process_single_match,
 )
 from src.data.events import (

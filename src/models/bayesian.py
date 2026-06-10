@@ -105,6 +105,7 @@ def _save_scaler(
     scaler: StandardScaler,
     features: list[str],
     max_value: float,
+    min_value: float,
     epsilon: float,
     spline_transformers: dict[str, Any] | None = None,
     position_specific_features: list[str] | None = None,
@@ -115,6 +116,7 @@ def _save_scaler(
             "scaler": scaler,
             "features": features,
             "max_value": max_value,
+            "min_value": min_value,
             "epsilon": epsilon,
             "spline_transformers": spline_transformers,
             "position_specific_features": position_specific_features or POSITION_SPECIFIC_FEATURES,
@@ -244,24 +246,26 @@ def fit_pooled_model() -> az.InferenceData | None:
 
     y_success: np.ndarray = np.asarray(df["success"].values).astype(int)
     y_value: np.ndarray = np.asarray(df["value_preserved"].values)
-    max_value: float = float(y_value.max()) if y_value.max() > 0 else 0.15
+    min_value: float = float(y_value.min())
+    y_value_shifted: np.ndarray = y_value - min_value
+    max_value: float = float(y_value_shifted.max()) if y_value_shifted.max() > 0 else 0.15
 
     epsilon: float = 1e-6
-    y_value_scaled: np.ndarray = (y_value / max_value) * (1 - 2 * epsilon) + epsilon
+    y_value_scaled: np.ndarray = (y_value_shifted / max_value) * (1 - 2 * epsilon) + epsilon
     y_value_scaled = np.clip(y_value_scaled, epsilon, 1 - epsilon)
 
     # ── Scaler (with intermediate caching) ────────────────────────────────
     MODEL_TRACES_DIR.mkdir(parents=True, exist_ok=True)
 
     cached = _load_cached_scaler(scaler_path)
-    if cached is not None and np.isclose(cached["max_value"], max_value):
+    if cached is not None and np.isclose(cached["max_value"], max_value) and np.isclose(cached.get("min_value", 0.0), min_value):
         scaler: StandardScaler = cached["scaler"]
         X_scaled: np.ndarray = scaler.transform(X)
         logger.info("Loaded cached scaler from %s", scaler_path)
     else:
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X)
-        _save_scaler(scaler_path, scaler, available_features, max_value, epsilon,
+        _save_scaler(scaler_path, scaler, available_features, max_value, min_value, epsilon,
                      spline_transformers, position_specific_features=list(POSITION_SPECIFIC_FEATURES))
         logger.info("Fitted and saved new scaler to %s", scaler_path)
 

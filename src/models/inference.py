@@ -15,7 +15,6 @@ from config import (
     CROSS_VALIDATION_HOLDOUT,
     MIN_EVENTS_THRESHOLD,
     MODEL_TRACES_DIR,
-    POSITION_SPECIFIC_FEATURES,
     PROCESSED_DATA_DIR,
     SPATIAL_CONFIG,
     TABLES_DIR,
@@ -71,6 +70,7 @@ def run_posterior_analysis() -> None:
         scaler = scaler_data["scaler"]
         feature_names: list[str] = scaler_data["features"]
         max_value: float = scaler_data["max_value"]
+        min_value: float = scaler_data.get("min_value", 0.0)
 
     df = pd.read_parquet(dataset_path)
 
@@ -220,7 +220,7 @@ def run_posterior_analysis() -> None:
             logit_val += theta_val[:, player_idx]
 
         prob_success: np.ndarray = expit(logit_succ)
-        expected_value_retention: np.ndarray = expit(logit_val) * max_value
+        expected_value_retention: np.ndarray = expit(logit_val) * max_value + min_value
 
         # Overall EV under pressure
         total_ev: np.ndarray = prob_success * expected_value_retention

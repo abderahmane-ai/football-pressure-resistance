@@ -17,7 +17,6 @@ from config import (
     CROSS_VALIDATION_HOLDOUT,
     MIN_EVENTS_THRESHOLD,
     MODEL_TRACES_DIR,
-    POSITION_SPECIFIC_FEATURES,
     PROCESSED_DATA_DIR,
     SPATIAL_CONFIG,
     TABLES_DIR,
@@ -77,6 +76,7 @@ def run_cross_validation() -> None:
 
     scaler = scaler_data["scaler"]
     max_value: float = scaler_data["max_value"]
+    min_value: float = scaler_data.get("min_value", 0.0)
     pos_mapping: dict[int, str] = mappings["position"]
 
     # Recompute masks for global vs. position-specific features
@@ -156,7 +156,7 @@ def run_cross_validation() -> None:
     # No opponent/competition adjustments — prior mean is zero for unseen groups
 
     p_succ: np.ndarray = expit(logit_succ_base)
-    mu_val: np.ndarray = expit(logit_val_base) * max_value
+    mu_val: np.ndarray = expit(logit_val_base) * max_value + min_value
 
     # Predicted Expected Value
     predicted_ev: np.ndarray = (p_succ * mu_val).mean(axis=0)
@@ -212,11 +212,10 @@ def run_cross_validation() -> None:
     ece: float = float(np.mean(np.abs(prob_true - prob_pred)))
     logger.info("  Expected Calibration Error (ECE): %.4f", ece)
 
-    # Save calibration data for plotting
+    TABLES_DIR.mkdir(parents=True, exist_ok=True)
+
     cal_df = pd.DataFrame({"prob_pred": prob_pred, "prob_true": prob_true})
     cal_df.to_csv(TABLES_DIR / f"calibration_curve_{holdout}.csv", index=False)
-
-    TABLES_DIR.mkdir(parents=True, exist_ok=True)
     merged.to_csv(TABLES_DIR / f"holdout_correlation_data_{holdout}.csv", index=False)
 
     metrics_df = pd.DataFrame([{

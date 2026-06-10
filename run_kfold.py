@@ -4,15 +4,15 @@ import subprocess
 import sys
 import time
 from importlib.util import find_spec
-from pathlib import Path
 
 import pandas as pd
+
+from config import COMPETITIONS, MODEL_TRACES_DIR, TABLES_DIR
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-COMPS = ["Euro_2020", "Euro_2024", "World_Cup_2022", "Bundesliga_2024",
-         "Copa_America_2024", "AFCON_2023", "MLS_2023"]
+COMPS = list(COMPETITIONS.keys())
 
 
 def get_python_cmd() -> str:
@@ -40,41 +40,41 @@ def run_step(step_cmd: list[str], env: dict[str, str]) -> None:
     process = subprocess.Popen(step_cmd, env=env, stdout=sys.stdout, stderr=subprocess.STDOUT)
     process.communicate()
     if process.returncode != 0:
-        logger.error(f"Step {' '.join(step_cmd)} failed with return code {process.returncode}")
+        logger.error("Step %s failed with return code %s", ' '.join(step_cmd), process.returncode)
         sys.exit(1)
 
 def main() -> None:
     logger.info("Starting 4-Fold Cross Validation Pipeline")
     check_optimization()
     python_cmd = get_python_cmd()
-    logger.info(f"Using Python executable: {python_cmd}")
+    logger.info("Using Python executable: %s", python_cmd)
 
     single_holdout = os.environ.get("PRS_HOLDOUT")
     if single_holdout:
         if single_holdout not in COMPS:
-            logger.error(f"Invalid holdout '{single_holdout}'. Must be one of {COMPS}")
+            logger.error("Invalid holdout '%s'. Must be one of %s", single_holdout, COMPS)
             sys.exit(1)
         comps_to_run = [single_holdout]
-        logger.info(f"Running single holdout: {single_holdout}")
+        logger.info("Running single holdout: %s", single_holdout)
     else:
         comps_to_run = COMPS
-        logger.info(f"Running full cross-validation over all comps: {comps_to_run}")
+        logger.info("Running full cross-validation over all comps: %s", comps_to_run)
 
     results = []
 
     for holdout in comps_to_run:
         fold = COMPS.index(holdout)
-        logger.info(f"{'='*60}")
-        logger.info(f"FOLD {fold + 1}/4: Holdout = {holdout}")
-        logger.info(f"{'='*60}")
+        logger.info("%s", '=' * 60)
+        logger.info("FOLD %d/4: Holdout = %s", fold + 1, holdout)
+        logger.info("%s", '=' * 60)
 
         env = os.environ.copy()
         env["PRS_HOLDOUT"] = holdout
 
         # Check if trace already exists on the persistent volume to avoid rerunning MCMC (55 min/fold)
-        trace_file = Path("outputs/model_traces") / f"pooled_trace_{holdout}.nc"
+        trace_file = MODEL_TRACES_DIR / f"pooled_trace_{holdout}.nc"
         if trace_file.exists() and os.environ.get("FORCE_RETRAIN", "") != "1":
-            logger.info(f"Trace for {holdout} already exists at {trace_file}. Skipping MCMC sampling for this fold.")
+            logger.info("Trace for %s already exists at %s. Skipping MCMC sampling for this fold.", holdout, trace_file)
             env["FORCE_RETRAIN"] = "0"
         else:
             env["FORCE_RETRAIN"] = "1"
@@ -90,13 +90,13 @@ def main() -> None:
 
         start_time = time.time()
         for step in steps:
-            logger.info(f"--> Executing: {' '.join(step)}")
+            logger.info("--> Executing: %s", ' '.join(step))
             run_step(step, env)
 
         fold_time = time.time() - start_time
-        logger.info(f"Fold {fold + 1} completed in {fold_time / 60:.1f} minutes.")
+        logger.info("Fold %d completed in %.1f minutes.", fold + 1, fold_time / 60)
 
-        metrics_file = Path(f"outputs/tables/holdout_metrics_{holdout}.csv")
+        metrics_file = TABLES_DIR / f"holdout_metrics_{holdout}.csv"
         if metrics_file.exists():
             df = pd.read_csv(metrics_file)
             pearson = df['pearson'].iloc[0]
@@ -108,15 +108,15 @@ def main() -> None:
                 "AUC": auc,
                 "Time_Mins": round(fold_time / 60, 1)
             })
-            logger.info(f"Fold {fold + 1} Results -> Pearson: {pearson:.3f}, AUC: {auc:.3f}")
+            logger.info("Fold %d Results -> Pearson: %.3f, AUC: %.3f", fold + 1, pearson, auc)
         else:
-            logger.error(f"Metrics file not found for fold {fold + 1}. Validation step may have failed.")
+            logger.error("Metrics file not found for fold %d. Validation step may have failed.", fold + 1)
             sys.exit(1)
 
     if not single_holdout:
-        logger.info(f"{'='*60}")
+        logger.info("%s", '=' * 60)
         logger.info("FINAL CROSS-VALIDATION RESULTS")
-        logger.info(f"{'='*60}")
+        logger.info("%s", '=' * 60)
 
         res_df = pd.DataFrame(results)
         print("\n" + res_df.to_string(index=False) + "\n")
@@ -125,11 +125,11 @@ def main() -> None:
         pearson_min = res_df['Pearson'].min()
         pearson_max = res_df['Pearson'].max()
 
-        logger.info(f"Mean Pearson Correlation: {mean_pearson:.3f} (Range: {pearson_min:.3f} - {pearson_max:.3f})")
+        logger.info("Mean Pearson Correlation: %.3f (Range: %.3f - %.3f)", mean_pearson, pearson_min, pearson_max)
 
-        Path("outputs/tables").mkdir(parents=True, exist_ok=True)
-        res_df.to_csv("outputs/tables/kfold_results.csv", index=False)
-        logger.info("Results saved to outputs/tables/kfold_results.csv")
+        TABLES_DIR.mkdir(parents=True, exist_ok=True)
+        res_df.to_csv(TABLES_DIR / "kfold_results.csv", index=False)
+        logger.info("Results saved to %s", TABLES_DIR / "kfold_results.csv")
 
 if __name__ == "__main__":
     main()

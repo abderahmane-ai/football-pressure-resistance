@@ -322,7 +322,7 @@ def _process_single_match(
                 "ball_carrier_event_id": item["ball_carrier_event_id"],
                 "player_id": player_id,
                 "player_name": player_name,
-                "position_group": position_groups.get(player_id, "Midfielder"),
+                "position_group": position_groups.get(player_id, "CM"),
                 "team_id": item["team_id"],
                 "opponent_team_id": item["opponent_team_id"],
                 "success": item["success"],

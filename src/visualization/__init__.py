@@ -2,6 +2,7 @@
 
 from src.visualization.interpretability import run_interpretability_analysis
 from src.visualization.plots import (
+    plot_calibration_curve,
     plot_feature_importance,
     plot_marginal_curves,
     plot_prs_leaderboard,
@@ -9,6 +10,7 @@ from src.visualization.plots import (
 )
 
 __all__ = [
+    "plot_calibration_curve",
     "plot_feature_importance",
     "plot_marginal_curves",
     "plot_prs_leaderboard",

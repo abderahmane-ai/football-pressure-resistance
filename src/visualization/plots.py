@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 
-from config import FIGURES_DIR, TABLES_DIR
+from config import CROSS_VALIDATION_HOLDOUT, FIGURES_DIR, TABLES_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,8 @@ except AttributeError:
 
 def plot_prs_leaderboard() -> None:
     """Plot top players on a 2D plane: Ball Security vs Value Retention."""
-    path = TABLES_DIR / "prs_leaderboard.csv"
+    holdout = CROSS_VALIDATION_HOLDOUT
+    path = TABLES_DIR / f"prs_leaderboard_{holdout}.csv"
     if not path.exists():
         return
 
@@ -104,7 +105,8 @@ def plot_feature_importance() -> None:
 
 def plot_stability_analysis() -> None:
     """Scatter plot: Training PRS vs Holdout Residuals."""
-    path = TABLES_DIR / "holdout_correlation_data.csv"
+    holdout = CROSS_VALIDATION_HOLDOUT
+    path = TABLES_DIR / f"holdout_correlation_data_{holdout}.csv"
     if not path.exists():
         return
 
@@ -133,13 +135,12 @@ def plot_stability_analysis() -> None:
     plt.axhline(0, color='grey', ls=':', alpha=0.5)
     plt.axvline(0, color='grey', ls=':', alpha=0.5)
 
-    from config import CROSS_VALIDATION_HOLDOUT
-    holdout_name = CROSS_VALIDATION_HOLDOUT.replace("_", " ")
+    holdout_name = holdout.replace("_", " ")
     plt.title(f'Cross-Tournament Stability Check\nTraining Combined PRS vs {holdout_name} Holdout Residuals', fontsize=13)
     plt.xlabel('Training Combined PRS (Expected xT Gain)', fontsize=11)
     plt.ylabel('Holdout Residual (Actual Value Gain above Predicted)', fontsize=11)
 
-    corr_path = TABLES_DIR / "holdout_metrics.csv"
+    corr_path = TABLES_DIR / f"holdout_metrics_{holdout}.csv"
     if corr_path.exists():
         metrics = pd.read_csv(corr_path).iloc[0]
         p_val = metrics.get('pearson_p', 0.0)
@@ -182,7 +183,6 @@ def plot_marginal_curves() -> None:
 
 def plot_calibration_curve() -> None:
     """Reliability diagram: observed vs predicted success probability."""
-    from config import CROSS_VALIDATION_HOLDOUT
     holdout = CROSS_VALIDATION_HOLDOUT
     path = TABLES_DIR / f"calibration_curve_{holdout}.csv"
     if not path.exists():
@@ -208,8 +208,9 @@ def plot_calibration_curve() -> None:
     plt.close()
     logger.info("Saved calibration curve plot.")
 
+FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+
 if __name__ == "__main__":
-    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     plot_prs_leaderboard()
     plot_feature_importance()
     plot_marginal_curves()

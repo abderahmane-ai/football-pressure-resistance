@@ -14,7 +14,6 @@ from scipy.special import expit
 from config import (
     CROSS_VALIDATION_HOLDOUT,
     MODEL_TRACES_DIR,
-    POSITION_SPECIFIC_FEATURES,
     PROCESSED_DATA_DIR,
     SPATIAL_CONFIG,
     TABLES_DIR,
@@ -42,6 +41,7 @@ def run_interpretability_analysis() -> None:
         scaler = scaler_data['scaler']
         feature_names = scaler_data['features']
         max_value = scaler_data.get('max_value', 1.0)
+        min_value = scaler_data.get('min_value', 0.0)
 
     # Recompute masks for global vs. position-specific features
     scaler_psf = scaler_data.get("position_specific_features", [])
@@ -265,7 +265,7 @@ def run_interpretability_analysis() -> None:
             logit_val = alpha_val_samples + feat_contrib_val + gamma_pos_val[:, mid_pos_code]
 
             probs_succ = expit(logit_succ)
-            ev_val = expit(logit_val) * max_value
+            ev_val = expit(logit_val) * max_value + min_value
             total_ev = probs_succ * ev_val
 
             results.append({
@@ -300,7 +300,7 @@ def run_interpretability_analysis() -> None:
                 feat_contrib_val = _feat_contrib(vec, beta_global_val, beta_pos_val, mid_pos_code)
                 logit_val = alpha_val_samples + feat_contrib_val + gamma_pos_val[:, mid_pos_code]
                 probs_succ = expit(logit_succ)
-                ev_val = expit(logit_val) * max_value
+                ev_val = expit(logit_val) * max_value + min_value
                 total_ev = probs_succ * ev_val
                 results.append({
                     'value': val,
@@ -381,7 +381,7 @@ def run_interpretability_analysis() -> None:
                         feat_contrib_val = _feat_contrib(scenario_vec, beta_global_val, beta_pos_val, pc)
                         logit_val = alpha_val_samples + feat_contrib_val + p_pos_val + p_theta_val
 
-                        total_ev = expit(logit_succ) * expit(logit_val) * max_value
+                        total_ev = expit(logit_succ) * (expit(logit_val) * max_value + min_value)
 
                         ice_results.append({
                             'player_name': player['name'],
@@ -412,7 +412,7 @@ def run_interpretability_analysis() -> None:
                     logit_succ = alpha_succ_samples + feat_contrib + p_pos_succ + p_theta_succ
                     feat_contrib_val = _feat_contrib(scenario_vec, beta_global_val, beta_pos_val, pc)
                     logit_val = alpha_val_samples + feat_contrib_val + p_pos_val + p_theta_val
-                    total_ev = expit(logit_succ) * expit(logit_val) * max_value
+                    total_ev = expit(logit_succ) * (expit(logit_val) * max_value + min_value)
                     ice_results.append({
                         'player_name': player['name'],
                         'rank_group': player['rank'],
