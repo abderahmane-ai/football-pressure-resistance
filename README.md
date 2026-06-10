@@ -205,9 +205,7 @@ python3 -m src.models.validation
 | `Euro_2024` | UEFA Euro | 2024 | 55 | 282 |
 | `World_Cup_2022` | FIFA World Cup | 2022 | 43 | 106 |
 | `Bundesliga_2024` | Bundesliga | 2023/24 | 9 | 281 |
-| `Copa_America_2024` | Copa América | 2024 | 223 | 282 |
-| `AFCON_2023` | Africa Cup of Nations | 2023 | 225 | 283 |
-| `MLS_2023` | Major League Soccer | 2023 | 194 | 289 |
+| `MLS_2023` | Major League Soccer | 2023 | 44 | 107 |
 
 ---
 

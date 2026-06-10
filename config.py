@@ -11,15 +11,13 @@ MODEL_TRACES_DIR   = OUTPUT_DIR / "model_traces"
 FIGURES_DIR        = OUTPUT_DIR / "figures"
 TABLES_DIR         = OUTPUT_DIR / "tables"
 
-# Competitions (Verified available 360 data)
+# Competitions with verified 360 frame data available
 COMPETITIONS = {
     "Bundesliga_2024":  {"comp_id": 9, "season_id": 281},
     "World_Cup_2022":   {"comp_id": 43, "season_id": 106},
     "Euro_2024":        {"comp_id": 55, "season_id": 282},
     "Euro_2020":        {"comp_id": 55, "season_id": 43},
-    "Copa_America_2024":{"comp_id": 223, "season_id": 282},
-    "AFCON_2023":       {"comp_id": 225, "season_id": 283},
-    "MLS_2023":         {"comp_id": 194, "season_id": 289},
+    "MLS_2023":         {"comp_id": 44, "season_id": 107},
 }
 
 CROSS_VALIDATION_HOLDOUT = os.environ.get("PRS_HOLDOUT", "Euro_2020")
