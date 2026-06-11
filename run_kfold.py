@@ -55,7 +55,7 @@ def main() -> None:
         comps_to_run = COMPS
         logger.info("Running full cross-validation over all comps: %s", comps_to_run)
 
-    n_folds = len(comps_to_run)
+    n_folds = len(COMPS)
     logger.info("Starting %d-Fold Cross Validation Pipeline", n_folds)
     check_optimization()
     python_cmd = get_python_cmd()
@@ -64,9 +64,9 @@ def main() -> None:
     results = []
 
     for holdout in comps_to_run:
-        fold = COMPS.index(holdout)
+        fold = COMPS.index(holdout) + 1
         logger.info("%s", '=' * 60)
-        logger.info("FOLD %d/%d: Holdout = %s", fold + 1, n_folds, holdout)
+        logger.info("FOLD %d/%d: Holdout = %s", fold, n_folds, holdout)
         logger.info("%s", '=' * 60)
 
         env = os.environ.copy()
