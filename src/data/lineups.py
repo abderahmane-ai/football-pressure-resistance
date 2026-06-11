@@ -1,6 +1,7 @@
 """Lineup and position-related utilities for StatsBomb data."""
 from __future__ import annotations
 
+import json
 import logging
 
 import numpy as np
@@ -10,6 +11,19 @@ from statsbombpy import sb
 from config import SPATIAL_CONFIG
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_positions(positions: object) -> list[dict[str, object]]:
+    """Parse positions field which may be a list, JSON string, or None."""
+    if isinstance(positions, list):
+        return positions
+    if isinstance(positions, str):
+        try:
+            parsed = json.loads(positions)
+            return parsed if isinstance(parsed, list) else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+    return []
 
 
 def fetch_lineups(match_id: int) -> dict[str, pd.DataFrame]:
@@ -27,12 +41,11 @@ def get_goalkeeper_ids_from_lineups(lineups: dict[str, pd.DataFrame]) -> set[int
     for team_name, lineup_df in lineups.items():
         if "positions" in lineup_df.columns:
             for _, player in lineup_df.iterrows():
-                positions = player["positions"]
-                if isinstance(positions, list):
-                    for pos_dict in positions:
-                        if isinstance(pos_dict, dict) and pos_dict.get("position") == "Goalkeeper":
-                            gk_ids.add(player["player_id"])
-                            break
+                positions = _parse_positions(player["positions"])
+                for pos_dict in positions:
+                    if isinstance(pos_dict, dict) and pos_dict.get("position") == "Goalkeeper":
+                        gk_ids.add(player["player_id"])
+                        break
         elif "player_position" in lineup_df.columns:
             gks = lineup_df[lineup_df["player_position"] == "Goalkeeper"]
             gk_ids.update(gks["player_id"].values)
@@ -53,9 +66,9 @@ def get_player_position_groups_from_lineups(
         if "positions" in lineup_df.columns:
             for _, player in lineup_df.iterrows():
                 player_id: int = player["player_id"]
-                positions = player["positions"]
+                positions = _parse_positions(player["positions"])
 
-                if isinstance(positions, list) and len(positions) > 0:
+                if positions:
                     assigned = False
                     for pos_dict in positions:
                         if isinstance(pos_dict, dict):
@@ -91,6 +104,7 @@ def get_player_position_groups_from_lineups(
                                 assigned = True
                                 break
                     if not assigned:
+                        logger.debug("Unknown position for player %d, defaulting to CM", player_id)
                         position_map[player_id] = "CM"
 
     # Impute missing using event locations (filter to open-play events
@@ -110,9 +124,16 @@ def get_player_position_groups_from_lineups(
                         (match_events["player_id"] == pid) & (match_events["location"].notna())
                     ]
                 if not player_events.empty:
-                    locs = np.array(player_events["location"].tolist())
-                    avg_x: float = float(np.mean(locs[:, 0]))
-                    avg_y: float = float(np.mean(locs[:, 1]))
+                    locs_raw = player_events["location"].tolist()
+                    # Filter to valid 2-element locations (avoid ragged arrays)
+                    locs_clean = [loc for loc in locs_raw if isinstance(loc, (list, tuple, np.ndarray)) and len(loc) >= 2]
+                    if not locs_clean:
+                        logger.debug("Player %d has no valid 2D locations, defaulting to CM", pid)
+                        position_map[pid] = "CM"
+                        continue
+                    locs = np.array(locs_clean)[:, :2].astype(float)
+                    avg_x = float(np.mean(locs[:, 0]))
+                    avg_y = float(np.mean(locs[:, 1]))
                     third: float = SPATIAL_CONFIG["pitch_length"] / 3.0
                     half_width: float = SPATIAL_CONFIG["pitch_width"] / 2.0
                     wide_threshold: float = half_width * 0.4
@@ -128,6 +149,7 @@ def get_player_position_groups_from_lineups(
                         else:
                             position_map[pid] = "CM"
                 else:
+                    logger.debug("Player %d has no events for position imputation, defaulting to CM", pid)
                     position_map[pid] = "CM"
 
     return position_map

@@ -1,7 +1,7 @@
-"""Tests for src.data.builder.compute_game_state_for_match."""
+"""Tests for src.data.events.compute_game_state_for_match."""
 import pandas as pd
 
-from src.data.builder import compute_game_state_for_match
+from src.data.events import compute_game_state_for_match
 
 
 def make_events(*rows):

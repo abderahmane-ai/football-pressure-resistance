@@ -2,7 +2,7 @@
 import numpy as np
 import pandas as pd
 
-from src.data.builder import compute_intended_xt
+from src.data.events import compute_intended_xt
 from src.data.pairing import _normalise_related_events
 
 

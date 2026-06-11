@@ -17,11 +17,7 @@ from config import (
 )
 from src.data.events import (
     process_single_match,
-    compute_game_state_for_match,
-    compute_intended_xt,
 )
-
-# Import sub-modules for builder logic and expose them for backward compatibility
 from src.data.lineups import (
     fetch_lineups,
     get_goalkeeper_ids_from_lineups,

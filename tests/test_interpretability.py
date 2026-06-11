@@ -12,37 +12,35 @@ from src.visualization import interpretability
 FEATURES = ["dist_nearest_opp", "angle_nearest_opp", "coverage_arc", "xt_value"]
 
 
-def _posterior_array(values):
-    return np.asarray(values, dtype=float).reshape(1, 4)
-
-
 def _build_trace(path, n_global=1, n_pos_specific=3, n_pos=1):
-    # Ensure all required posterior parameters are mock-sampled for interpretability
+    # Ensure all required posterior parameters are mock-sampled for interpretability.
+    # All shapes must follow ArviZ convention: (n_chains, n_draws, *param_dims).
     # theta_chol: packed lower-triangular Cholesky factor [chol[0,0], chol[1,0], chol[1,1]]
-    theta_chol_data = np.array([[0.5, 0.1, 0.4]])
-    theta_chol = np.broadcast_to(theta_chol_data, (1, 4, 3)).copy()
+    n_chains = 1
+    n_draws = 1
+    theta_chol_data = np.array([[0.5, 0.1, 0.4]])  # shape (1, 3): L00, L10, L11
     posterior = {
-        "alpha_succ": _posterior_array([0, 0, 0, 0]),
-        "beta_global_succ": np.zeros((1, 4, n_global)),
-        "beta_pos_succ": np.zeros((1, 4, n_pos, n_pos_specific)),
-        "theta_succ": np.array([[[1.0, 0.2], [1.0, 0.2], [1.0, 0.2], [1.0, 0.2]]]),
-        "gamma_pos_succ": np.zeros((1, 4, n_pos)),
-        "theta_chol": theta_chol,
-        "sigma_opp_succ": _posterior_array([0.1, 0.1, 0.1, 0.1]),
-        "sigma_comp_succ": _posterior_array([0.05, 0.05, 0.05, 0.05]),
-        "sigma_team_succ": _posterior_array([0.03, 0.03, 0.03, 0.03]),
-        "alpha_val": _posterior_array([0, 0, 0, 0]),
-        "beta_global_val": np.zeros((1, 4, n_global)),
-        "beta_pos_val": np.zeros((1, 4, n_pos, n_pos_specific)),
-        "theta_val": np.array([[[0.3, 0.1], [0.3, 0.1], [0.3, 0.1], [0.3, 0.1]]]),
-        "gamma_pos_val": np.zeros((1, 4, n_pos)),
-        "sigma_opp_val": _posterior_array([0.15, 0.15, 0.15, 0.15]),
-        "sigma_comp_val": _posterior_array([0.06, 0.06, 0.06, 0.06]),
-        "sigma_team_val": _posterior_array([0.04, 0.04, 0.04, 0.04]),
-        "delta_opp_succ": np.zeros((1, 4, 1)),
-        "zeta_comp_succ": np.zeros((1, 4, 1)),
-        "delta_opp_val": np.zeros((1, 4, 1)),
-        "zeta_comp_val": np.zeros((1, 4, 1)),
+        "alpha_succ": np.zeros((n_chains, n_draws)),
+        "beta_global_succ": np.zeros((n_chains, n_draws, n_global)),
+        "beta_pos_succ": np.zeros((n_chains, n_draws, n_pos, n_pos_specific)),
+        "theta_succ": np.array([[1.0, 0.2]]).reshape(n_chains, n_draws, 2),  # 2 players
+        "gamma_pos_succ": np.zeros((n_chains, n_draws, n_pos)),
+        "theta_chol": np.broadcast_to(theta_chol_data, (n_chains, n_draws, 3)).copy(),
+        "sigma_opp_succ": np.zeros((n_chains, n_draws)) + 0.1,
+        "sigma_comp_succ": np.zeros((n_chains, n_draws)) + 0.05,
+        "sigma_team_succ": np.zeros((n_chains, n_draws)) + 0.03,
+        "alpha_val": np.zeros((n_chains, n_draws)),
+        "beta_global_val": np.zeros((n_chains, n_draws, n_global)),
+        "beta_pos_val": np.zeros((n_chains, n_draws, n_pos, n_pos_specific)),
+        "theta_val": np.array([[0.3, 0.1]]).reshape(n_chains, n_draws, 2),  # 2 players
+        "gamma_pos_val": np.zeros((n_chains, n_draws, n_pos)),
+        "sigma_opp_val": np.zeros((n_chains, n_draws)) + 0.15,
+        "sigma_comp_val": np.zeros((n_chains, n_draws)) + 0.06,
+        "sigma_team_val": np.zeros((n_chains, n_draws)) + 0.04,
+        "delta_opp_succ": np.zeros((n_chains, n_draws, 1)),
+        "zeta_comp_succ": np.zeros((n_chains, n_draws, 1)),
+        "delta_opp_val": np.zeros((n_chains, n_draws, 1)),
+        "zeta_comp_val": np.zeros((n_chains, n_draws, 1)),
     }
     az.from_dict(posterior=posterior).to_netcdf(path)
 

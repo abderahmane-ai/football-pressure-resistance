@@ -60,7 +60,7 @@ def _ensure_columns(df: pd.DataFrame, required_columns: Iterable[str], context: 
 
 def _is_valid_location(value: object) -> bool:
     if value is None or (isinstance(value, float) and math.isnan(value)):
-        return True
+        return False
     if not hasattr(value, "__len__") or not hasattr(value, "__getitem__"):
         return False
     val_seq: Any = value

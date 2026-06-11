@@ -150,8 +150,8 @@ def _compute_labels(
                         concedes_next[gi] = 1
                     break
                 if own_mask[k]:
-                    # Own Goal For team_id = beneficiary, not the conceding player's team
-                    # So the branches are inverted vs regular goals
+                    # Own Goal For team_id = beneficiary (same semantics as regular
+                    # goal: teams[k] == teams[j] → our team scores)
                     if teams[k] != teams[j]:
                         concedes_next[gi] = 1
                     else:

@@ -115,24 +115,25 @@ def download_all(competition_name: str) -> None:
     else:
         logger.info("Events for %s already cached.", competition_name)
 
-    # Fetch match list once for frames download (avoid duplicate API call)
+    # Fetch match list for frames download (skip if all frames already cached)
+    frames_dir = out_dir / "frames"
+    frames_dir.mkdir(exist_ok=True)
+    cached_count = len([f for f in frames_dir.glob("*") if f.suffix in (".parquet", ".pkl")])
     matches = _retry_api_call(
         sb.matches, competition_id=comp_id, season_id=season_id,
         description=f"matches({comp_id}/{season_id})",
     )
-    frames_dir = out_dir / "frames"
-    frames_dir.mkdir(exist_ok=True)
-
-    for match_id in tqdm(matches["match_id"], desc=f"Downloading frames ({competition_name})"):
-        # Support both parquet (preferred) and legacy pickle
-        frame_path_parquet = frames_dir / f"{match_id}.parquet"
-        frame_path_legacy = frames_dir / f"{match_id}.pkl"
-        if not frame_path_parquet.exists() and not frame_path_legacy.exists():
-            frames_df = load_match_frames(match_id)
-            if isinstance(frames_df, pd.DataFrame) and not frames_df.empty:
-                frames_df.to_parquet(frame_path_parquet)
-        else:
-            logger.debug("Frames for match %d already cached.", match_id)
+    if cached_count < len(matches["match_id"]):
+        for match_id in tqdm(matches["match_id"], desc=f"Downloading frames ({competition_name})"):
+            # Support both parquet (preferred) and legacy pickle
+            frame_path_parquet = frames_dir / f"{match_id}.parquet"
+            frame_path_legacy = frames_dir / f"{match_id}.pkl"
+            if not frame_path_parquet.exists() and not frame_path_legacy.exists():
+                frames_df = load_match_frames(match_id)
+                if isinstance(frames_df, pd.DataFrame) and not frames_df.empty:
+                    frames_df.to_parquet(frame_path_parquet)
+            else:
+                logger.debug("Frames for match %d already cached.", match_id)
 
 
 def _read_frame_file(path: Path) -> pd.DataFrame:
@@ -160,13 +161,13 @@ def load_all_competitions(
         events_path = RAW_DATA_DIR / comp_name / "events.parquet"
         frames_dir = RAW_DATA_DIR / comp_name / "frames"
 
-        # Check if frames folder exists and has at least one .parquet or .pkl file
+        # Check if frames folder exists and has files for ALL matches
         has_frames = False
         if frames_dir.exists():
-            for f in frames_dir.glob("*"):
-                if f.suffix in (".parquet", ".pkl"):
-                    has_frames = True
-                    break
+            frame_files = [f for f in frames_dir.glob("*") if f.suffix in (".parquet", ".pkl")]
+            if frame_files and events_path.exists():
+                expected = len(pd.read_parquet(events_path, columns=["match_id"])["match_id"].unique())
+                has_frames = len(frame_files) >= expected
 
         if not events_path.exists() or not has_frames:
             logger.info("Data not fully cached for %s, ensuring download...", comp_name)

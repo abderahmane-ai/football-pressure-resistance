@@ -15,6 +15,7 @@ from src.features.geometry import xt_value
 from src.features.spatial import extract_spatial_features_from_frame
 
 _vaep_cache: dict[int, dict[str, float]] = {}
+_vaep_cache_enabled: bool = True
 _has_vaep: bool = True
 try:
     from src.features.vaep import compute_vaep
@@ -219,6 +220,8 @@ def process_single_match(
             )
 
         # Pre-compute VAEP for all events in this match (cached for O(1) lookup)
+        if _vaep_cache_enabled:
+            _vaep_cache.clear()
         if _has_vaep and compute_vaep is not None:
             try:
                 vaep_values = compute_vaep(match_events)

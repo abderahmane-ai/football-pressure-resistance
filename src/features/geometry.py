@@ -63,9 +63,9 @@ def point_in_pitch(x: float, y: float) -> bool:
 
 
 def _gaussian_influence(point: np.ndarray, players: Sequence[object], max_radius: float | None = None) -> float:
+    """Compute Gaussian influence of a list of players at a specific point."""
     if max_radius is None:
         max_radius = SPATIAL_CONFIG["pitch_control_max_radius"]
-    """Compute Gaussian influence of a list of players at a specific point."""
     if len(players) == 0:
         return 0.0
     arr = np.asarray(players, dtype=float)
@@ -140,7 +140,7 @@ def voronoi_area(ball_carrier: Sequence[float], all_players: list[Sequence[float
 
     bc_point = Point(ball_carrier)  # type: ignore[arg-type]
     for polygon in regions.geoms:
-        if polygon.contains(bc_point):
+        if polygon.covers(bc_point):
             clipped = polygon.intersection(pitch_polygon)
             # type: ignore[unnecessary-cast]
             return float(clipped.area)
