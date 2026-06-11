@@ -453,11 +453,17 @@ def fit_pooled_model() -> az.InferenceData | None:
             MODEL_SETTINGS["nuts_sampler"],
         )
 
+        # Enable parallel chain execution on single GPU via vmap.
+        # Must happen before any JAX operation (jax.devices() etc).
+        import numpyro
+        numpyro.set_host_device_count(MODEL_SETTINGS["chains"])
+
         # Verify JAX device (GPU/Metal/CPU-with-opt-in)
         _verify_jax_device()
 
-        import numpyro
-        numpyro.set_host_device_count(MODEL_SETTINGS["chains"])
+        # Suppress PyMC's pmap warning — we use chain_method='vectorized',
+        # so the pmap fallback is never used despite having only 1 device.
+        warnings.filterwarnings("ignore", message="There are not enough devices to run parallel chains")
 
         # chain_method='vectorized' uses vmap to run all chains simultaneously
         # on a single device — the only correct choice for 1×GPU.
