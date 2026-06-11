@@ -301,8 +301,6 @@ def fit_pooled_model() -> az.InferenceData | None:
     n_opp: int = len(opp_team_cats.cat.categories)
     n_teams: int = len(team_cats.cat.categories)
     n_pos: int = len(pos_cats.cat.categories)
-    n_features: int = len(available_features)
-
     player_mapping: dict[int, Any] = dict(enumerate(player_cats.cat.categories))
     comp_mapping: dict[int, str] = dict(enumerate(comp_cats.cat.categories))
     opp_team_mapping: dict[int, Any] = dict(enumerate(opp_team_cats.cat.categories))

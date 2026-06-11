@@ -127,7 +127,6 @@ def run_cross_validation() -> None:
     global_contrib_val = np.dot(beta_global_val, X_global.T)
 
     # Position-specific: broadcast beta_pos over holdout position codes
-    n_samples = beta_global_succ.shape[0]
     pos_contrib_succ = np.sum(
         beta_pos_succ[:, holdout_pos_codes, :] * X_pos[np.newaxis, :, :],
         axis=-1,
