@@ -159,8 +159,11 @@ def run_interpretability_analysis() -> None:
     total_var_succ = var_theta_succ + var_opp_succ + var_comp_succ + var_team_succ + var_features_succ
 
     # Value retention model
-    sigma_theta_val = theta_chol_flat[:, 2]
-    var_theta_val = float(np.mean(sigma_theta_val**2))
+    # Cholesky L = [[L00, 0], [L10, L11]] → theta_succ = L00 * z0, theta_val = L10*z0 + L11*z1
+    # Var(theta_val) = L10^2 + L11^2
+    L10 = theta_chol_flat[:, 1]
+    L11 = theta_chol_flat[:, 2]
+    var_theta_val = float(np.mean(L10**2 + L11**2))
 
     sigma_opp_val = post['sigma_opp_val'].values.flatten()
     var_opp_val = float(np.mean(sigma_opp_val**2))
@@ -231,7 +234,7 @@ def run_interpretability_analysis() -> None:
             _feat_contrib(X_scaled[i], beta_global_succ, beta_pos_succ, pos_idx[i])
             for i in range(len(X_scaled))
         ])
-        + gamma_pos_succ.mean(axis=0)[None, :]
+        + gamma_pos_succ[:, pos_idx]
     )
     p_post_mean = expit(logit_succ_mean).mean(axis=0)
     theta_succ_mean_post = theta_succ_samples.mean(axis=0)
@@ -248,10 +251,7 @@ def run_interpretability_analysis() -> None:
         results = []
         scenario_vec = np.zeros(len(feature_names))
         for val in values_range:
-            if global_mask[feat_idx]:
-                std_val = (val - scaler.mean_[feat_idx]) / scaler.scale_[feat_idx]
-            else:
-                std_val = 0.0  # position-specific features handled below
+            std_val = (val - scaler.mean_[feat_idx]) / scaler.scale_[feat_idx]
             scenario_vec[feat_idx] = std_val
 
             feat_contrib = _feat_contrib(scenario_vec, beta_global_succ, beta_pos_succ, mid_pos_code)
@@ -287,7 +287,8 @@ def run_interpretability_analysis() -> None:
             for j, val in enumerate(grid):
                 vec = np.zeros(len(feature_names))
                 for k in range(bases.shape[1]):
-                    vec[name_to_idx[dist_spline_cols[k]]] = bases[j, k]
+                    col_idx = name_to_idx[dist_spline_cols[k]]
+                    vec[col_idx] = (bases[j, k] - scaler.mean_[col_idx]) / scaler.scale_[col_idx]
                 # Spline columns are position-specific (root = dist_nearest_opp)
                 # so _feat_contrib uses the position-specific beta
                 feat_contrib = _feat_contrib(vec, beta_global_succ, beta_pos_succ, mid_pos_code)

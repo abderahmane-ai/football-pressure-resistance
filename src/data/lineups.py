@@ -96,7 +96,7 @@ def get_player_position_groups_from_lineups(
     # Impute missing using event locations (filter to open-play events
     # to avoid skewing from goal kicks, throw-ins, etc.)
     if match_events is not None:
-        open_play_types = {"Pass", "Carry", "Dribble", "Ball Receipt*", "Shot"}
+        open_play_types = {"Pass", "Carry", "Dribble", "Ball Receipt", "Shot"}
         all_players = match_events["player_id"].dropna().unique()
         for pid in all_players:
             if pid not in position_map:

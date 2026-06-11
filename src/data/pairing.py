@@ -110,7 +110,7 @@ def pair_pressure_with_ball_carrier(
                     continue
                 if related_event.get("type") not in BALL_CARRIER_EVENT_TYPES:
                     continue
-                if pressure_team_id is not None and related_event.get("team_id") == pressure_team_id:
+                if pressure_team_id is None or related_event.get("team_id") == pressure_team_id:
                     continue
                 candidate_events.append((related_id, related_event))
 

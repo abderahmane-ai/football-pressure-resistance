@@ -183,7 +183,7 @@ def run_posterior_analysis() -> None:
             if f_name in name_to_idx:
                 f_idx = name_to_idx[f_name]
                 if f_name not in ("opps_within_1yd", "opps_within_2yd", "opps_within_4yd",
-                                   "has_progressive_option", "counter_press", "recent_pressures"):
+                                   "has_progressive_option"):
                     vec[f_idx] = (val - scaler.mean_[f_idx]) / scaler.scale_[f_idx]
                 else:
                     vec[f_idx] = (0 - scaler.mean_[f_idx]) / scaler.scale_[f_idx]

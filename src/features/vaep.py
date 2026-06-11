@@ -150,10 +150,12 @@ def _compute_labels(
                         concedes_next[gi] = 1
                     break
                 if own_mask[k]:
+                    # Own Goal For team_id = beneficiary, not the conceding player's team
+                    # So the branches are inverted vs regular goals
                     if teams[k] != teams[j]:
-                        scores_next[gi] = 1
-                    else:
                         concedes_next[gi] = 1
+                    else:
+                        scores_next[gi] = 1
                     break
 
     result = pd.DataFrame({
@@ -258,11 +260,11 @@ def load_vaep_models() -> tuple[Any, Any] | None:
 def compute_vaep(events: pd.DataFrame) -> np.ndarray | None:
     """Compute VAEP value for each event.
 
-    VAEP = (P_score_after - P_score_before) - (P_concede_after - P_concede_before)
+    Canonical VAEP (Decroos et al. 2019):
+    VAEP(action_i) = [P_score(S_i) − P_score(S_{i-1})] − [P_concede(S_i) − P_concede(S_{i-1})]
 
-    This is the change in expected scoring probability minus the change
-    in expected conceding probability, giving each action a net value
-    that accounts for both offensive threat and defensive risk.
+    where S_i is the state before action_i. The difference measures the
+    change in scoring/conceding probability caused by the preceding action.
 
     Returns an array of VAEP values, same length as *events*.
     Returns None if VAEP models are not found.
@@ -279,24 +281,36 @@ def compute_vaep(events: pd.DataFrame) -> np.ndarray | None:
         "pass_ground", "pass_low", "pass_high",
     ]
 
-    features = _extract_state_features(events)
+    # Sort chronologically per match so consecutive rows are consecutive actions.
+    # Preserve original index so we can restore row order at the end.
+    sort_col = "index" if "index" in events.columns else "timestamp"
+    events_sorted = events.sort_values(["match_id", sort_col])
+
+    features = _extract_state_features(events_sorted)
     has_loc = features["_has_location"].values == 1.0
 
     X = features[feature_cols].values
 
-    # Baseline: uninformative state (centre spot, neutral)
-    baseline_vec = np.zeros((1, len(feature_cols)))
-    baseline_vec[0, 0] = 60.0 / SPATIAL_CONFIG["pitch_length"]  # loc_x
-    baseline_vec[0, 1] = 40.0 / SPATIAL_CONFIG["pitch_width"]   # loc_y
+    # Compute P(score|state) and P(concede|state) for every event state
+    p_score = score_model.predict_proba(X)[:, 1]
+    p_concede = concede_model.predict_proba(X)[:, 1]
 
-    p_score_before = score_model.predict_proba(baseline_vec)[0, 1]
-    p_concede_before = concede_model.predict_proba(baseline_vec)[0, 1]
+    vaep_sorted = np.zeros(len(events_sorted))
 
-    p_score_after = score_model.predict_proba(X)[:, 1]
-    p_concede_after = concede_model.predict_proba(X)[:, 1]
+    # Compute delta between consecutive events within each match
+    for match_id in events_sorted["match_id"].unique():
+        match_idx = np.where(events_sorted["match_id"].values == match_id)[0]
 
-    vaep = np.zeros(len(events))
-    vaep[has_loc] = (p_score_after[has_loc] - p_score_before) - (p_concede_after[has_loc] - p_concede_before)
-    vaep[~has_loc] = np.nan
+        for j, i in enumerate(match_idx):
+            if not has_loc[i]:
+                vaep_sorted[i] = np.nan
+                continue
 
-    return vaep
+            if j == 0:
+                vaep_sorted[i] = 0.0
+            else:
+                prev = match_idx[j - 1]
+                vaep_sorted[i] = (p_score[i] - p_score[prev]) - (p_concede[i] - p_concede[prev])
+
+    # Restore original row order using the preserved index
+    return pd.Series(vaep_sorted, index=events_sorted.index).reindex(events.index).values

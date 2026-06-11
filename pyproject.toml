@@ -29,7 +29,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest", "mypy", "ruff", "isort"]
-accelerated = ["numpyro", "jax"]
+accelerated = ["numpyro", "jax", "jaxlib"]
 
 # ── Pytest ────────────────────────────────────────────────────────────────────
 [tool.pytest.ini_options]

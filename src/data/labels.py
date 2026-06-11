@@ -83,7 +83,7 @@ def define_success(
                     success = 1.0
                     break
                 # Opponent wins ball cleanly
-                elif ev_type in ("Pass", "Carry", "Shot", "Clearance") and next_event["team_id"] != bc_event["team_id"]:
+                elif ev_type in ("Pass", "Carry", "Dribble", "Shot", "Clearance") and next_event["team_id"] != bc_event["team_id"]:
                     success = 0.0
                     break
                 # Same team retains possession

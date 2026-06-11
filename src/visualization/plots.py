@@ -84,16 +84,12 @@ def plot_feature_importance() -> None:
     fig, axes = plt.subplots(1, 2, figsize=(14, 8), sharey=True)
 
     colors_turn = ['crimson' if x < 0 else 'forestgreen' for x in df_turnover['mean']]
-    axes[0].barh(df_turnover.index, df_turnover['mean'],
-                 xerr=[df_turnover['mean'] - df_turnover['hdi_5%'], df_turnover['hdi_95%'] - df_turnover['mean']],
-                 color=colors_turn, alpha=0.7)
+    axes[0].barh(df_turnover.index, df_turnover['mean'], color=colors_turn, alpha=0.7)
     axes[0].axvline(0, color='black', lw=1)
     axes[0].set_title('Effect on Ball Security', fontsize=12)
 
     colors_val = ['crimson' if x < 0 else 'forestgreen' for x in df_value['mean']]
-    axes[1].barh(df_value.index, df_value['mean'],
-                 xerr=[df_value['mean'] - df_value['hdi_5%'], df_value['hdi_95%'] - df_value['mean']],
-                 color=colors_val, alpha=0.7)
+    axes[1].barh(df_value.index, df_value['mean'], color=colors_val, alpha=0.7)
     axes[1].axvline(0, color='black', lw=1)
     axes[1].set_title('Effect on Value Retention', fontsize=12)
 

@@ -8,7 +8,7 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from config import MODEL_FEATURE_COLUMNS
+from config import MODEL_FEATURE_COLUMNS_BASE
 
 
 def dataframe_hash(df: pd.DataFrame) -> str:
@@ -48,7 +48,7 @@ def save_parquet_with_metadata(
         b"prs.holdout": holdout.encode(),
         b"prs.n_competitions": str(n_competitions).encode(),
         b"prs.n_events": str(len(df)).encode(),
-        b"prs.features": ",".join(MODEL_FEATURE_COLUMNS).encode(),
+        b"prs.features": ",".join(MODEL_FEATURE_COLUMNS_BASE).encode(),
     }
     merged = {**existing_meta, **extra}
     table = table.replace_schema_metadata(merged)

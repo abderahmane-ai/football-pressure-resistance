@@ -44,12 +44,6 @@ def run_step(step_cmd: list[str], env: dict[str, str]) -> None:
         sys.exit(1)
 
 def main() -> None:
-    n_folds = len(comps_to_run)
-    logger.info("Starting %d-Fold Cross Validation Pipeline", n_folds)
-    check_optimization()
-    python_cmd = get_python_cmd()
-    logger.info("Using Python executable: %s", python_cmd)
-
     single_holdout = os.environ.get("PRS_HOLDOUT")
     if single_holdout:
         if single_holdout not in COMPS:
@@ -60,6 +54,12 @@ def main() -> None:
     else:
         comps_to_run = COMPS
         logger.info("Running full cross-validation over all comps: %s", comps_to_run)
+
+    n_folds = len(comps_to_run)
+    logger.info("Starting %d-Fold Cross Validation Pipeline", n_folds)
+    check_optimization()
+    python_cmd = get_python_cmd()
+    logger.info("Using Python executable: %s", python_cmd)
 
     results = []
 
