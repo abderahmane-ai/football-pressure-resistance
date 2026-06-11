@@ -148,3 +148,170 @@ class TestRecentPressures:
         assert rp_by_id['e3'] == 1
         assert rp_by_id['e5'] == 2
 
+
+class TestProcessSingleMatch:
+    """End-to-end tests for the process_single_match worker function."""
+
+    @staticmethod
+    def _ev(**kw):
+        defaults = dict(index=0, match_id=100, location=[60.0, 40.0], player_id="p1")
+        defaults.update(kw)
+        return defaults
+
+    @staticmethod
+    def _frame(event_uuid, bc_loc, opp_loc):
+        return {
+            "event_uuid": event_uuid,
+            "freeze_frame": [
+                {"location": bc_loc, "actor": True, "teammate": True, "player_id": "p1"},
+                {"location": opp_loc, "actor": False, "teammate": False, "player_id": "opp1"},
+            ],
+        }
+
+    @staticmethod
+    def _ev_pass(**kw):
+        ev = dict(index=0, match_id=100, location=[60.0, 40.0], player_id="p1")
+        ev.update(kw)
+        ev["pass"] = {"height": {"id": 1}}
+        return ev
+
+    def test_basic_pass(self):
+        """Single pressed pass with frame → one row with correct metadata."""
+        from src.data.events import process_single_match
+
+        events = pd.DataFrame([
+            self._ev_pass(id="e1", type="Pass", team_id="A", index=1,
+                          minute=5, period=1, pass_recipient="p2"),
+            self._ev(id="p1", type="Pressure", team_id="B",
+                     related_events=["e1"], index=2),
+        ])
+        frames = pd.DataFrame([self._frame("e1", [60, 40], [61, 40])])
+        args = (100, events, frames, set(), {"p1": "MF"}, "Test_Comp")
+        rows = process_single_match(args)
+        assert len(rows) == 1
+        r = rows[0]
+        assert r["ball_carrier_event_id"] == "e1"
+        assert r["player_id"] == "p1"
+        assert r["position_group"] == "MF"
+        assert r["team_id"] == "A"
+        assert r["opponent_team_id"] == "B"
+        assert r["success"] == 1.0
+        assert isinstance(r["value_preserved"], float)
+        assert r["minutes_elapsed"] == 5
+        assert r["counter_press"] == 0.0
+        assert r["pass_height_ground"] == 1.0
+        assert r["pass_height_low"] == 0.0
+        assert r["pass_height_high"] == 0.0
+
+    def test_goalkeeper_skipped(self):
+        """Player in gk_ids → filtered out."""
+        from src.data.events import process_single_match
+
+        events = pd.DataFrame([
+            self._ev_pass(id="e1", type="Pass", team_id="A", index=1,
+                          minute=5, period=1, pass_recipient="p2"),
+            self._ev(id="p1", type="Pressure", team_id="B",
+                     related_events=["e1"], index=2),
+        ])
+        frames = pd.DataFrame([self._frame("e1", [60, 40], [61, 40])])
+        args = (100, events, frames, {"p1"}, {"p1": "GK"}, "Test_Comp")
+        assert len(process_single_match(args)) == 0
+
+    def test_no_pressure_events(self):
+        """Match with no Pressure events → empty list."""
+        from src.data.events import process_single_match
+
+        events = pd.DataFrame([
+            self._ev(id="e1", type="Pass", team_id="A", index=1),
+        ])
+        args = (100, events, pd.DataFrame(), set(), {}, "Test_Comp")
+        assert len(process_single_match(args)) == 0
+
+    def test_no_matching_frames(self):
+        """Pressure event but no matching 360 frame → empty list."""
+        from src.data.events import process_single_match
+
+        events = pd.DataFrame([
+            self._ev_pass(id="e1", type="Pass", team_id="A", index=1,
+                          minute=5, period=1, pass_recipient="p2"),
+            self._ev(id="p1", type="Pressure", team_id="B",
+                     related_events=["e1"], index=2),
+        ])
+        frames = pd.DataFrame([self._frame("other", [60, 40], [61, 40])])
+        args = (100, events, frames, set(), {"p1": "MF"}, "Test_Comp")
+        assert len(process_single_match(args)) == 0
+
+    def test_missing_player_id(self):
+        """Ball-carrier event without player_id → no row."""
+        from src.data.events import process_single_match
+
+        events = pd.DataFrame([
+            {"id": "e1", "type": "Pass", "team_id": "A", "index": 1,
+             "match_id": 100, "location": [60.0, 40.0],
+             "pass": {"height": {"id": 1}}, "minute": 5, "period": 1,
+             "pass_recipient": "p2", "player_id": None},
+            self._ev(id="p1", type="Pressure", team_id="B",
+                     related_events=["e1"], index=2),
+        ])
+        frames = pd.DataFrame([self._frame("e1", [60, 40], [61, 40])])
+        args = (100, events, frames, set(), {}, "Test_Comp")
+        assert len(process_single_match(args)) == 0
+
+    def test_empty_events(self):
+        """Empty events DataFrame → empty list, no crash."""
+        from src.data.events import process_single_match
+
+        args = (100, pd.DataFrame(), pd.DataFrame(), set(), {}, "Test_Comp")
+        assert len(process_single_match(args)) == 0
+
+    def test_opponent_too_far_filtered(self):
+        """Opponent beyond tight_pressure_radius → row dropped."""
+        from src.data.events import process_single_match
+
+        events = pd.DataFrame([
+            self._ev_pass(id="e1", type="Pass", team_id="A", index=1,
+                          minute=5, period=1, pass_recipient="p2"),
+            self._ev(id="p1", type="Pressure", team_id="B",
+                     related_events=["e1"], index=2),
+        ])
+        # Opponent at (70, 40) → distance 10 > tight_pressure_radius (5)
+        frames = pd.DataFrame([self._frame("e1", [60, 40], [70, 40])])
+        args = (100, events, frames, set(), {"p1": "MF"}, "Test_Comp")
+        assert len(process_single_match(args)) == 0
+
+    def test_counter_press_true(self):
+        """Pressure event with counterpress=True propagates into row."""
+        from src.data.events import process_single_match
+
+        events = pd.DataFrame([
+            self._ev_pass(id="e1", type="Pass", team_id="A", index=1,
+                          minute=5, period=1, pass_recipient="p2"),
+            self._ev(id="p1", type="Pressure", team_id="B",
+                     related_events=["e1"], index=2, counterpress=True),
+        ])
+        frames = pd.DataFrame([self._frame("e1", [60, 40], [61, 40])])
+        args = (100, events, frames, set(), {"p1": "MF"}, "Test_Comp")
+        rows = process_single_match(args)
+        assert len(rows) == 1
+        assert rows[0]["counter_press"] == 1.0
+
+    def test_dribble_processed(self):
+        """Dribble under pressure produces a row with xT via next-event location."""
+        from src.data.events import process_single_match
+
+        events = pd.DataFrame([
+            self._ev(id="e1", type="Dribble", team_id="A", index=1,
+                     minute=5, period=1),
+            # next event provides location for xT fallback on dribble
+            self._ev(id="e2", type="Pass", team_id="A", index=2,
+                     location=[65.0, 40.0]),
+            self._ev(id="p1", type="Pressure", team_id="B",
+                     related_events=["e1"], index=3),
+        ])
+        frames = pd.DataFrame([self._frame("e1", [60, 40], [61, 40])])
+        args = (100, events, frames, set(), {"p1": "MF"}, "Test_Comp")
+        rows = process_single_match(args)
+        assert len(rows) == 1
+        assert rows[0]["ball_carrier_event_id"] == "e1"
+        assert isinstance(rows[0]["value_preserved"], float)
+
