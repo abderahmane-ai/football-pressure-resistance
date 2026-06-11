@@ -289,7 +289,7 @@ def compute_vaep(events: pd.DataFrame) -> np.ndarray | None:
     features = _extract_state_features(events_sorted)
     has_loc = features["_has_location"].values == 1.0
 
-    X = features[feature_cols].values
+    X = features[feature_cols]
 
     # Compute P(score|state) and P(concede|state) for every event state
     p_score = score_model.predict_proba(X)[:, 1]
