@@ -346,7 +346,7 @@ def process_single_match(
         )
     if not rows:
         logger.debug("Match %d: n_labeled=%d, n_features_ok=%d, n_dist_ok=%d, n_xt_ok=%d", match_id, n_labeled, n_features_ok, n_dist_ok, n_xt_ok)
-        logger.warning(
+        logger.debug(
             "Match %d (%s): worker produced 0 rows — all events filtered or no pressure events found",
             match_id, comp_name,
         )

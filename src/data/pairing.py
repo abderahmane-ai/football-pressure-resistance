@@ -122,7 +122,7 @@ def pair_pressure_with_ball_carrier(
             related_id, related_event = candidate_events[0]
             frame_data = frames_lookup.get(related_id)
             if not frame_data:
-                logger.warning(
+                logger.debug(
                     "Pressure-carrier pair dropped: no 360 frame for event %s (match %s)",
                     related_id, pressure_event.get("match_id", "?"),
                 )
