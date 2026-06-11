@@ -456,6 +456,9 @@ def fit_pooled_model() -> az.InferenceData | None:
         # Verify JAX device (GPU/Metal/CPU-with-opt-in)
         _verify_jax_device()
 
+        import numpyro
+        numpyro.set_host_device_count(MODEL_SETTINGS["chains"])
+
         # chain_method='vectorized' uses vmap to run all chains simultaneously
         # on a single device — the only correct choice for 1×GPU.
         # 'parallel' (pmap) requires one device per chain and silently falls
