@@ -11,7 +11,6 @@ from tqdm import tqdm
 
 from config import (
     COMPETITIONS,
-    CROSS_VALIDATION_HOLDOUT,
     MODEL_FEATURE_COLUMNS_BASE,
     PROCESSED_DATA_DIR,
 )
@@ -47,7 +46,8 @@ def build_all_datasets(include_holdout: bool = False) -> pd.DataFrame | None:
     # is content-addressed by the upstream StatsBomb API; if the raw cache
     # is unchanged, the processed dataset is byte-equivalent and rebuilding
     # it costs 15-30 min for no gain.
-    out_file = PROCESSED_DATA_DIR / f"all_pressure_dataset_{CROSS_VALIDATION_HOLDOUT}.parquet"
+    holdout = os.environ.get("PRS_HOLDOUT", "Euro_2020")
+    out_file = PROCESSED_DATA_DIR / f"all_pressure_dataset_{holdout}.parquet"
     if out_file.exists() and not os.environ.get("PRS_FORCE_REBUILD_DATA", "") == "1":
         logger.info(
             "Found cached training dataset at %s. Skipping rebuild "
@@ -57,9 +57,9 @@ def build_all_datasets(include_holdout: bool = False) -> pd.DataFrame | None:
         return pd.read_parquet(out_file)
 
     comp_names = list(COMPETITIONS.keys())
-    if not include_holdout and CROSS_VALIDATION_HOLDOUT in comp_names:
-        comp_names.remove(CROSS_VALIDATION_HOLDOUT)
-        logger.info("Excluding holdout competition: %s", CROSS_VALIDATION_HOLDOUT)
+    if not include_holdout and os.environ.get("PRS_HOLDOUT", "Euro_2020") in comp_names:
+        comp_names.remove(os.environ.get("PRS_HOLDOUT", "Euro_2020"))
+        logger.info("Excluding holdout competition: %s", os.environ.get("PRS_HOLDOUT", "Euro_2020"))
 
     all_comp_data = load_all_competitions(comp_names)
     all_processed_data: list[dict[str, Any]] = []
@@ -130,7 +130,7 @@ def build_all_datasets(include_holdout: bool = False) -> pd.DataFrame | None:
             dataset_df,
             out_file,
             source_hash=source_hash,
-            holdout=CROSS_VALIDATION_HOLDOUT,
+            holdout=os.environ.get("PRS_HOLDOUT", "Euro_2020"),
             n_competitions=len(comp_names),
         )
         logger.info(
@@ -143,10 +143,11 @@ def build_all_datasets(include_holdout: bool = False) -> pd.DataFrame | None:
 
 def build_holdout_dataset() -> None:
     """Build dataset for holdout competition only (parallelised per match)."""
-    logger.info("Building holdout dataset: %s", CROSS_VALIDATION_HOLDOUT)
+    logger.info("Building holdout dataset: %s", os.environ.get("PRS_HOLDOUT", "Euro_2020"))
 
     PROCESSED_DATA_DIR.mkdir(parents=True, exist_ok=True)
-    out_file = PROCESSED_DATA_DIR / f"holdout_pressure_dataset_{CROSS_VALIDATION_HOLDOUT}.parquet"
+    holdout = os.environ.get("PRS_HOLDOUT", "Euro_2020")
+    out_file = PROCESSED_DATA_DIR / f"holdout_pressure_dataset_{holdout}.parquet"
     if out_file.exists() and not os.environ.get("PRS_FORCE_REBUILD_DATA", "") == "1":
         logger.info(
             "Found cached holdout dataset at %s. Skipping rebuild "
@@ -155,7 +156,7 @@ def build_holdout_dataset() -> None:
         )
         return
 
-    all_comp_data = load_all_competitions([CROSS_VALIDATION_HOLDOUT])
+    all_comp_data = load_all_competitions([os.environ.get("PRS_HOLDOUT", "Euro_2020")])
     all_processed_data: list[dict[str, Any]] = []
 
     for comp_name, comp_data in all_comp_data.items():
@@ -213,7 +214,7 @@ def build_holdout_dataset() -> None:
             dataset_df,
             out_file,
             source_hash=source_hash,
-            holdout=CROSS_VALIDATION_HOLDOUT,
+            holdout=os.environ.get("PRS_HOLDOUT", "Euro_2020"),
             n_competitions=1,
         )
         logger.info(
