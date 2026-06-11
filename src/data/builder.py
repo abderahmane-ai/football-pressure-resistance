@@ -85,7 +85,7 @@ def build_all_datasets(include_holdout: bool = False) -> pd.DataFrame | None:
                 lineups_by_match[futures[fut]] = fut.result()
 
         # Pre-group events by match_id to avoid re-filtering the full DataFrame
-        match_groups: dict[int, pd.DataFrame] = dict(events_df.groupby("match_id"))
+        match_groups: dict[int, pd.DataFrame] = {k: v for k, v in events_df.groupby("match_id")}
 
         gk_ids_by_match: dict[int, set[int]] = {}
         pos_groups_by_match: dict[int, dict[int, str]] = {}
@@ -177,7 +177,7 @@ def build_holdout_dataset() -> None:
             for fut in tqdm(futures, desc="Loading holdout lineups"):
                 lineups_by_match[futures[fut]] = fut.result()
 
-        match_groups: dict[int, pd.DataFrame] = dict(events_df.groupby("match_id"))
+        match_groups: dict[int, pd.DataFrame] = {k: v for k, v in events_df.groupby("match_id")}
 
         gk_ids_by_match: dict[int, set[int]] = {}
         pos_groups_by_match: dict[int, dict[int, str]] = {}
