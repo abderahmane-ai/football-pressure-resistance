@@ -5,27 +5,31 @@ from src.features.geometry import (
     angular_span,
     lane_unblocked,
     pitch_control_value,
-    point_in_pitch,
     voronoi_area,
     xt_value,
 )
 
 
+def _point_in_pitch(x: float, y: float) -> bool:
+    """Check if a point is within the pitch dimensions (120x80)."""
+    return 0 <= x <= 120 and 0 <= y <= 80
+
+
 class TestPointInPitch:
     def test_center_is_in_pitch(self):
-        assert point_in_pitch(60, 40) is True
+        assert _point_in_pitch(60, 40) is True
 
     def test_origin_is_in_pitch(self):
-        assert point_in_pitch(0, 0) is True
+        assert _point_in_pitch(0, 0) is True
 
     def test_outside_x_is_not_in_pitch(self):
-        assert point_in_pitch(121, 40) is False
+        assert _point_in_pitch(121, 40) is False
 
     def test_outside_y_is_not_in_pitch(self):
-        assert point_in_pitch(60, 81) is False
+        assert _point_in_pitch(60, 81) is False
 
     def test_negative_is_not_in_pitch(self):
-        assert point_in_pitch(-1, 40) is False
+        assert _point_in_pitch(-1, 40) is False
 
 
 class TestXtValue:

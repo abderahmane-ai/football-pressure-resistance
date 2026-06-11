@@ -12,7 +12,7 @@ from tqdm import tqdm
 from config import (
     COMPETITIONS,
     CROSS_VALIDATION_HOLDOUT,
-    MODEL_FEATURE_COLUMNS,
+    MODEL_FEATURE_COLUMNS_BASE,
     PROCESSED_DATA_DIR,
 )
 from src.data.events import (
@@ -121,7 +121,7 @@ def build_all_datasets(include_holdout: bool = False) -> pd.DataFrame | None:
 
     if all_processed_data:
         dataset_df = pd.DataFrame(all_processed_data)
-        validate_model_dataset(dataset_df, MODEL_FEATURE_COLUMNS, context="training pressure dataset")
+        validate_model_dataset(dataset_df, MODEL_FEATURE_COLUMNS_BASE, context="training pressure dataset")
         PROCESSED_DATA_DIR.mkdir(parents=True, exist_ok=True)
         # Key the training dataset by holdout so the 4-fold CV cache survives
         # across folds without overwriting an in-use file.
@@ -207,7 +207,7 @@ def build_holdout_dataset() -> None:
 
     if all_processed_data:
         dataset_df = pd.DataFrame(all_processed_data)
-        validate_model_dataset(dataset_df, MODEL_FEATURE_COLUMNS, context="holdout pressure dataset")
+        validate_model_dataset(dataset_df, MODEL_FEATURE_COLUMNS_BASE, context="holdout pressure dataset")
         source_hash = dataframe_hash(dataset_df)
         save_parquet_with_metadata(
             dataset_df,

@@ -72,27 +72,39 @@ def main() -> None:
         env = os.environ.copy()
         env["PRS_HOLDOUT"] = holdout
 
-        # Check if trace already exists on the persistent volume to avoid rerunning MCMC (55 min/fold)
-        trace_file = MODEL_TRACES_DIR / f"pooled_trace_{holdout}.nc"
-        if trace_file.exists() and os.environ.get("PRS_FORCE_RETRAIN", "") != "1":
-            logger.info("Trace for %s already exists at %s. Skipping MCMC sampling for this fold.", holdout, trace_file)
-            env["PRS_FORCE_RETRAIN"] = "0"
-        else:
-            env["PRS_FORCE_RETRAIN"] = "1"
+        start_time = time.time()
 
-
-        steps = [
+        # VAEP and Builder — skip via their own file-existence checks,
+        # independent of PRS_FORCE_RETRAIN (which exists for MCMC only).
+        # This avoids race conditions when run_kfold.py is invoked in
+        # parallel (e.g. on Modal) where all folds set PRS_FORCE_RETRAIN=1
+        # and would otherwise fight over the same VAEP model files.
+        pre_steps = [
             [python_cmd, "-m", "src.features.train_vaep"],
             [python_cmd, "-m", "src.data.builder"],
-            [python_cmd, "-m", "src.models.bayesian"],
-            [python_cmd, "-m", "src.models.inference"],
-            [python_cmd, "-m", "src.models.validation"]
         ]
-
-        start_time = time.time()
-        for step in steps:
+        for step in pre_steps:
             logger.info("--> Executing: %s", ' '.join(step))
             run_step(step, env)
+
+        # MCMC and downstream steps — respect PRS_FORCE_RETRAIN to
+        # avoid re-running 55-minute sampling when trace is cached.
+        trace_file = MODEL_TRACES_DIR / f"pooled_trace_{holdout}.nc"
+        model_env = env.copy()
+        if trace_file.exists() and os.environ.get("PRS_FORCE_RETRAIN", "") != "1":
+            logger.info("Trace for %s already exists at %s. Skipping MCMC sampling for this fold.", holdout, trace_file)
+            model_env["PRS_FORCE_RETRAIN"] = "0"
+        else:
+            model_env["PRS_FORCE_RETRAIN"] = "1"
+
+        model_steps = [
+            [python_cmd, "-m", "src.models.bayesian"],
+            [python_cmd, "-m", "src.models.inference"],
+            [python_cmd, "-m", "src.models.validation"],
+        ]
+        for step in model_steps:
+            logger.info("--> Executing: %s", ' '.join(step))
+            run_step(step, model_env)
 
         fold_time = time.time() - start_time
         logger.info("Fold %d completed in %.1f minutes.", fold + 1, fold_time / 60)

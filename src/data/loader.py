@@ -4,7 +4,9 @@ from __future__ import annotations
 import logging
 import time
 import warnings
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any, TypeVar
 
 import pandas as pd
 from statsbombpy import sb
@@ -21,8 +23,10 @@ logger = logging.getLogger(__name__)
 _MAX_RETRIES: int = 3
 _RETRY_BACKOFF: float = 2.0  # seconds; doubled on each retry
 
+_T = TypeVar("_T")
 
-def _retry_api_call(fn, *args, description: str = "API call", **kwargs):  # type: ignore[no-untyped-def]
+
+def _retry_api_call(fn: Callable[..., _T], *args: Any, description: str = "API call", **kwargs: Any) -> _T:
     """Retry a StatsBomb API call with exponential backoff."""
     delay = _RETRY_BACKOFF
     for attempt in range(1, _MAX_RETRIES + 1):

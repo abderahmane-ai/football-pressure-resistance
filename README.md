@@ -45,7 +45,7 @@ pressure_resistance/
     │   └── validation.py            # Explicit data validation contracts
     ├── features/
     │   ├── geometry.py              # Gaussian pitch control, xT grid, Voronoi, angular span
-    │   ├── spatial.py               # Freeze-frame -> 37-feature vector (with B-splines)
+    │   ├── spatial.py               # Freeze-frame -> 41-feature vector (with B-splines)
     │   ├── vaep.py                  # VAEP model: state extraction, labels, predictions
     │   └── train_vaep.py            # LightGBM training script for scoring & conceding classifiers
     ├── models/
@@ -184,8 +184,16 @@ python3 -m src.visualization.interpretability
 python3 -m src.visualization.plots
 ```
 
-### Holdout Competition
-Controlled via the `PRS_HOLDOUT` environment variable (default: `Euro_2020`). Must be set before running the full pipeline:
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PRS_HOLDOUT` | `Euro_2020` | Competition held out during cross-validation |
+| `PRS_FORCE_RETRAIN` | (unset) | Set to `1` to force retrain VAEP models and MCMC chains |
+| `PRS_FORCE_REBUILD_DATA` | (unset) | Set to `1` to force rebuild all feature datasets |
+| `PRS_ALLOW_CPU` | (unset) | Set to `1` to run MCMC on CPU (warning: very slow) |
+
+Holdout example:
 ```bash
 export PRS_HOLDOUT=World_Cup_2022
 python3 -m src.features.train_vaep

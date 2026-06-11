@@ -72,7 +72,7 @@ def get_player_position_groups_from_lineups(
                     assigned = False
                     for pos_dict in positions:
                         if isinstance(pos_dict, dict):
-                            pos_name: str = pos_dict.get("position", "").lower()
+                            pos_name: str = str(pos_dict.get("position", "")).lower()
                             if "goalkeeper" in pos_name:
                                 assigned = True
                                 break

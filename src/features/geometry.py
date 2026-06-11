@@ -57,10 +57,6 @@ XT_GRID_VALUES: np.ndarray = _load_xt_grid()
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def point_in_pitch(x: float, y: float) -> bool:
-    """Check if a point is within the pitch dimensions."""
-    return 0 <= x <= SPATIAL_CONFIG["pitch_length"] and 0 <= y <= SPATIAL_CONFIG["pitch_width"]
-
 
 def _gaussian_influence(point: np.ndarray, players: Sequence[object], max_radius: float | None = None) -> float:
     """Compute Gaussian influence of a list of players at a specific point."""

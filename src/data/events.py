@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import traceback
 from typing import Any
 
@@ -14,8 +15,7 @@ from src.data.pairing import pair_pressure_with_ball_carrier
 from src.features.geometry import xt_value
 from src.features.spatial import extract_spatial_features_from_frame
 
-_vaep_cache: dict[int, dict[str, float]] = {}
-_vaep_cache_enabled: bool = True
+_vaep_cache = threading.local()
 _has_vaep: bool = True
 try:
     from src.features.vaep import compute_vaep
@@ -96,10 +96,15 @@ def compute_intended_xt(
     """
     bc_event_id: str = item["ball_carrier_event_id"]
 
-    # Try VAEP first (cached per match)
+    # Try VAEP first (per-thread cache, safe with ThreadPoolExecutor)
     match_id = item.get("match_id")
-    if match_id is not None and match_id in _vaep_cache:
-        return _vaep_cache[match_id].get(bc_event_id)
+    cache: dict[int, dict[str, float]] | None = getattr(_vaep_cache, "data", None)
+    if cache is not None and match_id is not None:
+        match_vaep = cache.get(match_id)
+        if match_vaep is not None:
+            result = match_vaep.get(bc_event_id)
+            if result is not None:
+                return float(result)
 
     # Fall back to xT
     if id_to_idx is not None and (match_events_list is not None or not match_events.empty):
@@ -219,15 +224,16 @@ def process_single_match(
                 .to_dict()
             )
 
-        # Pre-compute VAEP for all events in this match (cached for O(1) lookup)
-        if _vaep_cache_enabled:
-            _vaep_cache.clear()
+        # Pre-compute VAEP for all events in this match (per-thread cache)
+        if not hasattr(_vaep_cache, "data"):
+            _vaep_cache.data = {}
+        _vaep_cache.data.clear()
         if _has_vaep and compute_vaep is not None:
             try:
                 vaep_values = compute_vaep(match_events)
                 if vaep_values is not None and "id" in match_events.columns:
                     match_vaep = dict(zip(match_events["id"], vaep_values))
-                    _vaep_cache[match_id] = match_vaep
+                    _vaep_cache.data[match_id] = match_vaep
             except Exception:
                 logger.debug("VAEP computation failed for match %d, falling back to xT", match_id)
 
