@@ -35,6 +35,8 @@ pressure_resistance/
 │   ├── raw/                         # Cached StatsBomb data
 │   └── processed/                   # Built datasets
 └── src/
+    ├── common.py                    # Shared is_valid_loc(), event type string constants
+    ├── paths.py                     # ModelPaths dataclass — single source of truth for artifact paths
     ├── data/
     │   ├── loader.py                # StatsBomb API caching + I/O
     │   ├── pairing.py               # Links Pressure → ball-carrier events + 360 frames
@@ -49,8 +51,9 @@ pressure_resistance/
     │   ├── vaep.py                  # VAEP model: state extraction, labels, predictions
     │   └── train_vaep.py            # LightGBM training script for scoring & conceding classifiers
     ├── models/
+    │   ├── posterior.py             # PosteriorContext — shared access for all analysis modules
     │   ├── bayesian.py              # Joint Hurdle model (LKJ prior) + MCMC sampling
-    │   ├── inference.py             # Posterior -> leaderboard + scenario analysis
+    │   ├── inference.py             # Posterior → leaderboard + scenario analysis
     │   └── validation.py            # Calibration metrics + ECE + residual correlations
     └── visualization/
         ├── interpretability.py      # Variance decomposition, ICE curves, marginal effects, SNR
