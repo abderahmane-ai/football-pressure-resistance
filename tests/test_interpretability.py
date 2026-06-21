@@ -7,7 +7,6 @@ import pandas as pd
 from sklearn.preprocessing import StandardScaler
 
 from config import CROSS_VALIDATION_HOLDOUT
-from src.visualization import interpretability
 
 FEATURES = ["dist_nearest_opp", "angle_nearest_opp", "coverage_arc", "xt_value"]
 
@@ -109,11 +108,13 @@ def _build_artifacts(tmp_path):
 
 def test_run_interpretability_analysis_outputs(tmp_path, monkeypatch):
     traces_dir, tables_dir, processed_dir = _build_artifacts(tmp_path)
-    monkeypatch.setattr(interpretability, "MODEL_TRACES_DIR", traces_dir)
-    monkeypatch.setattr(interpretability, "TABLES_DIR", tables_dir)
-    monkeypatch.setattr(interpretability, "PROCESSED_DATA_DIR", processed_dir)
+    for mod in ("config", "src.paths"):
+        monkeypatch.setattr(f"{mod}.MODEL_TRACES_DIR", traces_dir)
+        monkeypatch.setattr(f"{mod}.TABLES_DIR", tables_dir)
+        monkeypatch.setattr(f"{mod}.PROCESSED_DATA_DIR", processed_dir)
 
-    interpretability.run_interpretability_analysis()
+    from src.visualization.interpretability import run_interpretability_analysis
+    run_interpretability_analysis()
 
     # Check that CSV tables were created
     assert (tables_dir / "feature_importance.csv").exists()

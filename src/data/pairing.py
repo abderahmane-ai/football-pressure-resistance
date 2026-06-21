@@ -7,9 +7,9 @@ from typing import Any
 
 import pandas as pd
 
-logger = logging.getLogger(__name__)
+from src.common import BALL_CARRIER_EVENT_TYPES
 
-BALL_CARRIER_EVENT_TYPES: frozenset[str] = frozenset({"Pass", "Carry", "Dribble"})
+logger = logging.getLogger(__name__)
 
 
 def _normalise_related_events(value: Any) -> list[str]:

@@ -8,7 +8,7 @@ import pytest
 from sklearn.preprocessing import StandardScaler
 
 from config import CROSS_VALIDATION_HOLDOUT
-from src.models import inference
+from src.paths import require_paths
 
 FEATURES = ["dist_nearest_opp", "angle_nearest_opp", "coverage_arc", "xt_value"]
 
@@ -96,17 +96,19 @@ def _build_artifacts(tmp_path):
 
 def test_require_paths_reports_missing_artifacts(tmp_path):
     with pytest.raises(FileNotFoundError, match="Required model artifact"):
-        inference._require_paths(tmp_path / "missing.nc")
+        require_paths(tmp_path / "missing.nc")
 
 
 def test_run_posterior_analysis_writes_sorted_leaderboard(tmp_path, monkeypatch):
     traces_dir, tables_dir, processed_dir = _build_artifacts(tmp_path)
-    monkeypatch.setattr(inference, "MODEL_TRACES_DIR", traces_dir)
-    monkeypatch.setattr(inference, "TABLES_DIR", tables_dir)
-    monkeypatch.setattr(inference, "PROCESSED_DATA_DIR", processed_dir)
-    monkeypatch.setattr(inference, "MIN_EVENTS_THRESHOLD", 1)
+    for mod in ("config", "src.paths"):
+        monkeypatch.setattr(f"{mod}.MODEL_TRACES_DIR", traces_dir)
+        monkeypatch.setattr(f"{mod}.TABLES_DIR", tables_dir)
+        monkeypatch.setattr(f"{mod}.PROCESSED_DATA_DIR", processed_dir)
+    monkeypatch.setattr("src.models.inference.MIN_EVENTS_THRESHOLD", 1)
 
-    inference.run_posterior_analysis()
+    from src.models.inference import run_posterior_analysis
+    run_posterior_analysis()
 
     leaderboard = pd.read_csv(tables_dir / f"prs_leaderboard_{CROSS_VALIDATION_HOLDOUT}.csv")
     assert leaderboard["player_id"].tolist() == ["p1", "p2"]

@@ -1,6 +1,9 @@
 import os
 from pathlib import Path
 
+import numpy as np
+from sklearn.preprocessing import SplineTransformer
+
 # Paths
 ROOT_DIR           = Path(__file__).parent
 DATA_DIR           = ROOT_DIR / "data"
@@ -84,10 +87,15 @@ POSITION_SPECIFIC_FEATURES = [
 SPLINE_FEATURES = ["bc_x", "bc_y", "dist_nearest_opp"]
 
 # Final model feature columns: base + spline expansions
-# (spline column names are computed dynamically; n_knots=5, degree=3,
-# include_bias=False → 6 basis functions per feature)
-_SPLINE_N_BASIS = 6
-MODEL_FEATURE_COLUMNS = (
+# Computed dynamically from the actual SplineTransformer output to avoid
+# hardcoded desync when n_knots or degree change.
+def _get_spline_n_basis() -> int:
+    dummy = SplineTransformer(n_knots=5, degree=3, include_bias=False)
+    dummy.fit(np.array([[0.0], [1.0]]))
+    return int(dummy.n_features_out_)
+
+_SPLINE_N_BASIS: int = _get_spline_n_basis()
+MODEL_FEATURE_COLUMNS: list[str] = (
     MODEL_FEATURE_COLUMNS_BASE
     + [f"{feat}_spline_{i}" for feat in SPLINE_FEATURES for i in range(_SPLINE_N_BASIS)]
 )

@@ -9,6 +9,7 @@ import pandas as pd
 from statsbombpy import sb
 
 from config import SPATIAL_CONFIG
+from src.common import BALL_CARRIER_EVENT_TYPES, EVENT_TYPE_BALL_RECEIPT, EVENT_TYPE_SHOT
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +111,7 @@ def get_player_position_groups_from_lineups(
     # Impute missing using event locations (filter to open-play events
     # to avoid skewing from goal kicks, throw-ins, etc.)
     if match_events is not None:
-        open_play_types = {"Pass", "Carry", "Dribble", "Ball Receipt", "Shot"}
+        open_play_types = BALL_CARRIER_EVENT_TYPES | {EVENT_TYPE_BALL_RECEIPT, EVENT_TYPE_SHOT}
         all_players = match_events["player_id"].dropna().unique()
         for pid in all_players:
             if pid not in position_map:

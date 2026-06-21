@@ -16,6 +16,15 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 
 from config import SPATIAL_CONFIG, VAEP_CONFIG
+from src.common import (
+    EVENT_TYPE_CARRY,
+    EVENT_TYPE_DRIBBLE,
+    EVENT_TYPE_DUEL,
+    EVENT_TYPE_OWN_GOAL_FOR,
+    EVENT_TYPE_PASS,
+    EVENT_TYPE_SHOT,
+    is_valid_loc,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,12 +42,6 @@ _VAEP_MODEL_DIR: Path = Path(cast(str, VAEP_CONFIG["model_dir"]))
 _VAEP_MODELS: tuple[Any, Any] | None = None
 _VAEP_SCORE_FILENAME: str = "vaep_score.pkl"
 _VAEP_CONCEDE_FILENAME: str = "vaep_concede.pkl"
-
-
-def _is_valid_loc(loc: Any) -> bool:
-    if loc is not None and hasattr(loc, "__len__") and len(loc) >= 2:
-        return True
-    return False
 
 
 def _extract_state_features(events: pd.DataFrame) -> pd.DataFrame:
@@ -68,7 +71,7 @@ def _extract_state_features(events: pd.DataFrame) -> pd.DataFrame:
 
     for i in range(n):
         loc = locs[i]
-        if not _is_valid_loc(loc):
+        if not is_valid_loc(loc):
             rows.append({})
             continue
 
@@ -78,7 +81,7 @@ def _extract_state_features(events: pd.DataFrame) -> pd.DataFrame:
 
         ev_type = ev_types[i] if not pd.isna(ev_types[i]) else ""
         ph_id = 0
-        if ev_type == "Pass":
+        if ev_type == EVENT_TYPE_PASS:
             pass_info = pass_infos[i]
             if isinstance(pass_info, dict):
                 height_info = pass_info.get("height")
@@ -92,11 +95,11 @@ def _extract_state_features(events: pd.DataFrame) -> pd.DataFrame:
             "angle_to_goal": angle_to_goal,
             "goal_diff": float(goal_diff_col[i]),
             "under_pressure": 1.0 if under_pressure_col[i] else 0.0,
-            "is_pass": 1.0 if ev_type == "Pass" else 0.0,
-            "is_dribble": 1.0 if ev_type == "Dribble" else 0.0,
-            "is_shot": 1.0 if ev_type == "Shot" else 0.0,
-            "is_carry": 1.0 if ev_type == "Carry" else 0.0,
-            "is_duel": 1.0 if ev_type == "Duel" else 0.0,
+            "is_pass": 1.0 if ev_type == EVENT_TYPE_PASS else 0.0,
+            "is_dribble": 1.0 if ev_type == EVENT_TYPE_DRIBBLE else 0.0,
+            "is_shot": 1.0 if ev_type == EVENT_TYPE_SHOT else 0.0,
+            "is_carry": 1.0 if ev_type == EVENT_TYPE_CARRY else 0.0,
+            "is_duel": 1.0 if ev_type == EVENT_TYPE_DUEL else 0.0,
             "pass_ground": 1.0 if ph_id == 1 else 0.0,
             "pass_low": 1.0 if ph_id == 2 else 0.0,
             "pass_high": 1.0 if ph_id == 3 else 0.0,
@@ -120,7 +123,7 @@ def _compute_labels(
     else:
         events = events.sort_values(["match_id", "timestamp"]).reset_index(drop=True)
 
-    is_shot = events["type"] == "Shot"
+    is_shot = events["type"] == EVENT_TYPE_SHOT
     shot_outcome = events.get("shot_outcome")
     if shot_outcome is None:
         shot_outcome = events.get("shot_outcome_name")
@@ -128,7 +131,7 @@ def _compute_labels(
         is_goal_event = is_shot & (shot_outcome == "Goal")
     else:
         is_goal_event = pd.Series(False, index=events.index)
-    is_own_goal = events["type"] == "Own Goal For"
+    is_own_goal = events["type"] == EVENT_TYPE_OWN_GOAL_FOR
 
     scores_next = np.zeros(len(events), dtype=np.int32)
     concedes_next = np.zeros(len(events), dtype=np.int32)

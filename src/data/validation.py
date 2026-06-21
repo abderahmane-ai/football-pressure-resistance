@@ -1,11 +1,11 @@
 """Validation helpers for raw StatsBomb inputs and processed model data."""
 from __future__ import annotations
 
-import math
 from collections.abc import Iterable
-from typing import Any
 
 import pandas as pd
+
+from src.common import is_valid_loc
 
 
 class DataValidationError(ValueError):
@@ -58,18 +58,6 @@ def _ensure_columns(df: pd.DataFrame, required_columns: Iterable[str], context: 
         )
 
 
-def _is_valid_location(value: object) -> bool:
-    if value is None or (isinstance(value, float) and math.isnan(value)):
-        return False
-    if not hasattr(value, "__len__") or not hasattr(value, "__getitem__"):
-        return False
-    val_seq: Any = value
-    if len(val_seq) < 2:
-        return False
-    x, y = val_seq[0], val_seq[1]
-    return bool(pd.notna(x) and pd.notna(y))
-
-
 def validate_statsbomb_events(events_df: pd.DataFrame, context: str = "events") -> None:
     """Validate the raw StatsBomb event columns used by pairing/labels/building."""
     _ensure_dataframe(events_df, context)
@@ -92,7 +80,7 @@ def validate_statsbomb_events(events_df: pd.DataFrame, context: str = "events") 
         )
 
     if "location" in events_df.columns:
-        valid_mask = events_df["location"].dropna().map(_is_valid_location)
+        valid_mask = events_df["location"].dropna().map(is_valid_loc)
         if not valid_mask.all():
             n_bad = int((~valid_mask).sum())
             raise DataValidationError(

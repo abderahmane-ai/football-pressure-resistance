@@ -20,7 +20,6 @@ from config import (
     MODEL_SETTINGS,
     MODEL_TRACES_DIR,
     POSITION_SPECIFIC_FEATURES,
-    PROCESSED_DATA_DIR,
 )
 from src.data.validation import DataValidationError, validate_model_dataset
 from src.features.spatial import (
@@ -28,6 +27,7 @@ from src.features.spatial import (
     fit_spline_transformers,
     is_position_specific,
 )
+from src.paths import ModelPaths
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
@@ -199,27 +199,24 @@ def fit_pooled_model() -> az.InferenceData | None:
     # mappings must be keyed by holdout name, otherwise fold 1's model is
     # silently reused for folds 2-4 (data leakage in the CV metrics).
     holdout = CROSS_VALIDATION_HOLDOUT
-    trace_path: Path = MODEL_TRACES_DIR / f"pooled_trace_{holdout}.nc"
-    scaler_path: Path = MODEL_TRACES_DIR / f"pooled_scaler_{holdout}.pkl"
-    mappings_path: Path = MODEL_TRACES_DIR / f"pooled_mappings_{holdout}.pkl"
+    p = ModelPaths(holdout)
 
-    if trace_path.exists() and not os.environ.get("PRS_FORCE_RETRAIN", "") == "1":
+    if p.trace.exists() and not os.environ.get("PRS_FORCE_RETRAIN", "") == "1":
         logger.info(
             "Found existing trace at %s. Skipping MCMC (set PRS_FORCE_RETRAIN=1 to override).",
-            trace_path,
+            p.trace,
         )
-        return az.from_netcdf(str(trace_path))  # type: ignore[no-any-return]
+        return az.from_netcdf(str(p.trace))  # type: ignore[no-any-return]
 
-    dataset_path: Path = PROCESSED_DATA_DIR / f"all_pressure_dataset_{holdout}.parquet"
-    if not dataset_path.exists():
+    if not p.training_dataset.exists():
         logger.error(
             "Dataset not found at %s. Run src.data.builder first to generate "
             "the processed training data.",
-            dataset_path,
+            p.training_dataset,
         )
         return None
 
-    df = pd.read_parquet(dataset_path)
+    df = pd.read_parquet(p.training_dataset)
 
     # Expand spatial features with B-spline basis (replaces bc_x, bc_y, dist_nearest_opp
     # with non-linear spline expansions that capture non-linear pitch geography)
@@ -251,17 +248,17 @@ def fit_pooled_model() -> az.InferenceData | None:
     # ── Scaler (with intermediate caching) ────────────────────────────────
     MODEL_TRACES_DIR.mkdir(parents=True, exist_ok=True)
 
-    cached = _load_cached_scaler(scaler_path)
+    cached = _load_cached_scaler(p.scaler)
     if cached is not None and np.isclose(cached["max_value"], max_value) and np.isclose(cached.get("min_value", 0.0), min_value):
         scaler: StandardScaler = cached["scaler"]
         X_scaled: np.ndarray = scaler.transform(X)
-        logger.info("Loaded cached scaler from %s", scaler_path)
+        logger.info("Loaded cached scaler from %s", p.scaler)
     else:
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X)
-        _save_scaler(scaler_path, scaler, available_features, max_value, min_value, epsilon,
+        _save_scaler(p.scaler, scaler, available_features, max_value, min_value, epsilon,
                      spline_transformers, position_specific_features=list(POSITION_SPECIFIC_FEATURES))
-        logger.info("Fitted and saved new scaler to %s", scaler_path)
+        logger.info("Fitted and saved new scaler to %s", p.scaler)
 
     # ── Split into global vs. position-specific features ─────────────────
     pos_specific_mask: np.ndarray = np.array(
@@ -311,7 +308,7 @@ def fit_pooled_model() -> az.InferenceData | None:
     pos_lookup: dict[Any, str] = df.drop_duplicates("player_id").set_index("player_id")["position_group"].to_dict()
 
     _save_mappings(
-        mappings_path,
+        p.mappings,
         player_mapping, comp_mapping, opp_team_mapping, team_mapping, pos_mapping,
         name_lookup, pos_lookup,
     )
@@ -482,8 +479,8 @@ def fit_pooled_model() -> az.InferenceData | None:
             progressbar=True,
         )
 
-    trace.to_netcdf(str(trace_path))
-    logger.info("Saved trace to %s", trace_path)
+    trace.to_netcdf(str(p.trace))
+    logger.info("Saved trace to %s", p.trace)
 
     return trace  # type: ignore[no-any-return]
 

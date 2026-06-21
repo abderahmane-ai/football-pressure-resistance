@@ -2,8 +2,6 @@
 from __future__ import annotations
 
 import logging
-import pickle
-from pathlib import Path
 from typing import Any
 
 import arviz as az
@@ -12,28 +10,13 @@ import pandas as pd
 from scipy.special import expit
 
 from config import (
-    CROSS_VALIDATION_HOLDOUT,
     MIN_EVENTS_THRESHOLD,
-    MODEL_TRACES_DIR,
-    PROCESSED_DATA_DIR,
     SPATIAL_CONFIG,
-    TABLES_DIR,
 )
-from src.data.validation import validate_model_dataset
-from src.features.spatial import expand_spline_features, is_position_specific
+from src.models.posterior import load_posterior_context
+from src.paths import ModelPaths
 
 logger = logging.getLogger(__name__)
-
-
-def _require_paths(*paths: Path) -> None:
-    """Raise with an actionable message listing every missing artifact."""
-    missing = [str(p) for p in paths if not p.exists()]
-    if missing:
-        raise FileNotFoundError(
-            "Required model artifact(s) missing — run the pipeline from data "
-            "build through model fitting first.\n  Missing: "
-            + "\n  Missing: ".join(missing)
-        )
 
 
 def run_posterior_analysis() -> None:
@@ -49,66 +32,22 @@ def run_posterior_analysis() -> None:
     probability scale (p_succ × μ_val), but that conflates the two traits
     and makes the ranking sensitive to the base rate.
     """
-    holdout = CROSS_VALIDATION_HOLDOUT
-    trace_path: Path = MODEL_TRACES_DIR / f"pooled_trace_{holdout}.nc"
-    mapping_path: Path = MODEL_TRACES_DIR / f"pooled_mappings_{holdout}.pkl"
-    scaler_path: Path = MODEL_TRACES_DIR / f"pooled_scaler_{holdout}.pkl"
-    dataset_path: Path = PROCESSED_DATA_DIR / f"all_pressure_dataset_{holdout}.parquet"
-    _require_paths(trace_path, mapping_path, scaler_path, dataset_path)
+    ctx = load_posterior_context()
 
-    trace: az.InferenceData = az.from_netcdf(trace_path)
-
-    with open(mapping_path, "rb") as f:
-        mappings: dict[str, Any] = pickle.load(f)
-    player_mapping: dict[int, Any] = mappings["player"]
-    pos_mapping: dict[int, str] = mappings["position"]
-    name_lookup: dict[Any, str] = mappings.get("name_lookup", {})
-    pos_lookup: dict[Any, str] = mappings.get("position_lookup", {})
-
-    with open(scaler_path, "rb") as f:
-        scaler_data: dict[str, Any] = pickle.load(f)
-        scaler = scaler_data["scaler"]
-        feature_names: list[str] = scaler_data["features"]
-        max_value: float = scaler_data["max_value"]
-        min_value: float = scaler_data.get("min_value", 0.0)
-
-    df = pd.read_parquet(dataset_path)
-
-    # Expand spline features using the fitted transformers saved with the scaler
-    spline_transformers = scaler_data.get("spline_transformers")
-    if spline_transformers:
-        df = expand_spline_features(df, spline_transformers)
-
-    validate_model_dataset(df, feature_names, context="posterior analysis dataset")
-    event_counts: dict[Any, int] = df["player_id"].value_counts().to_dict()
-
-    post = trace.posterior  # type: ignore[attr-defined]
-
-    # Recompute masks for global vs. position-specific features
-    scaler_position_specific = scaler_data.get("position_specific_features", [])
-    pos_specific_mask: np.ndarray = np.array([is_position_specific(f, scaler_position_specific) for f in feature_names])
-    global_mask: np.ndarray = ~pos_specific_mask
-    n_pos_specific: int = int(pos_specific_mask.sum())
-    n_global: int = int(global_mask.sum())
-
-    # Success / Ball Security parameters
-    alpha_succ: np.ndarray = post["alpha_succ"].values.flatten()
-    beta_global_succ: np.ndarray = post["beta_global_succ"].values.reshape(-1, n_global)
-    beta_pos_succ: np.ndarray = post["beta_pos_succ"].values.reshape(-1, len(pos_mapping), n_pos_specific)
-    theta_succ: np.ndarray = post["theta_succ"].values.reshape(-1, len(player_mapping))
-    gamma_pos_succ: np.ndarray = post["gamma_pos_succ"].values.reshape(-1, len(pos_mapping))
-
-    # Value Parameters
-    alpha_val: np.ndarray = post["alpha_val"].values.flatten()
-    beta_global_val: np.ndarray = post["beta_global_val"].values.reshape(-1, n_global)
-    beta_pos_val: np.ndarray = post["beta_pos_val"].values.reshape(-1, len(pos_mapping), n_pos_specific)
-    theta_val: np.ndarray = post["theta_val"].values.reshape(-1, len(player_mapping))
-    gamma_pos_val: np.ndarray = post["gamma_pos_val"].values.reshape(-1, len(pos_mapping))
+    # Local aliases for the rest of the function body
+    player_mapping = ctx.player_mapping
+    pos_mapping = ctx.pos_mapping
+    name_lookup = ctx.name_lookup
+    pos_lookup = ctx.pos_lookup
+    scaler = ctx.scaler
+    feature_names = ctx.feature_names
+    max_value = ctx.max_value
+    min_value = ctx.min_value
+    event_counts: dict[Any, int] = ctx.df["player_id"].value_counts().to_dict()
 
     # Extract correlation between θ_succ and θ_val
-    rho_theta = post.get("rho_theta", None)
-    if rho_theta is not None:
-        rho_vals = getattr(rho_theta, "values", rho_theta)
+    if ctx.rho_theta is not None:
+        rho_vals = getattr(ctx.rho_theta, "values", ctx.rho_theta)
         rho_mean: float = float(rho_vals.mean())
         rho_hdi = az.hdi(rho_vals.flatten(), hdi_prob=0.90)
         logger.info(
@@ -116,39 +55,28 @@ def run_posterior_analysis() -> None:
             rho_mean, rho_hdi[0], rho_hdi[1],
         )
 
-    # Opponent, competition, and team posterior effects
-    delta_opp_succ: np.ndarray = post["delta_opp_succ"].values.reshape(-1, post["delta_opp_succ"].shape[-1])
-    zeta_comp_succ: np.ndarray = post["zeta_comp_succ"].values.reshape(-1, post["zeta_comp_succ"].shape[-1])
-    eta_team_succ: np.ndarray = post["eta_team_succ"].values.reshape(-1, post["eta_team_succ"].shape[-1])
-    delta_opp_val: np.ndarray = post["delta_opp_val"].values.reshape(-1, post["delta_opp_val"].shape[-1])
-    zeta_comp_val: np.ndarray = post["zeta_comp_val"].values.reshape(-1, post["zeta_comp_val"].shape[-1])
-    eta_team_val: np.ndarray = post["eta_team_val"].values.reshape(-1, post["eta_team_val"].shape[-1])
-
     # Marginalise by posterior group mean; shape: (n_samples,)
-    mean_opp_succ: np.ndarray = delta_opp_succ.mean(axis=1)
-    mean_comp_succ: np.ndarray = zeta_comp_succ.mean(axis=1)
-    mean_team_succ: np.ndarray = eta_team_succ.mean(axis=1)
-    mean_opp_val: np.ndarray = delta_opp_val.mean(axis=1)
-    mean_comp_val: np.ndarray = zeta_comp_val.mean(axis=1)
-    mean_team_val: np.ndarray = eta_team_val.mean(axis=1)
+    mean_opp_succ: np.ndarray = ctx.delta_opp_succ.mean(axis=1)
+    mean_comp_succ: np.ndarray = ctx.zeta_comp_succ.mean(axis=1)
+    mean_team_succ: np.ndarray = ctx.eta_team_succ.mean(axis=1)
+    mean_opp_val: np.ndarray = ctx.delta_opp_val.mean(axis=1)
+    mean_comp_val: np.ndarray = ctx.zeta_comp_val.mean(axis=1)
+    mean_team_val: np.ndarray = ctx.eta_team_val.mean(axis=1)
 
     tight_dist: float = SPATIAL_CONFIG["tight_pressure_radius"] * 0.3
     loose_dist: float = SPATIAL_CONFIG["tight_pressure_radius"] * 0.6
 
-    # O(1) feature name lookup
-    name_to_idx: dict[str, int] = {name: i for i, name in enumerate(feature_names)}
-
     # Pre-compute spline basis for distance scenarios
     dist_spline_cols = [c for c in feature_names if c.startswith('dist_nearest_opp_spline_')]
     dist_scenario_vecs: dict[str, np.ndarray] = {}
-    if dist_spline_cols and scaler_data.get("spline_transformers"):
-        dist_tr = scaler_data["spline_transformers"].get("dist_nearest_opp")
+    if dist_spline_cols and ctx.spline_transformers:
+        dist_tr = ctx.spline_transformers.get("dist_nearest_opp")
         if dist_tr is not None:
             for label, dist_val in [("tight", tight_dist), ("loose", loose_dist)]:
                 basis = dist_tr.transform([[dist_val]])[0]
                 vec = np.zeros(len(feature_names))
                 for k, col_name in enumerate(dist_spline_cols):
-                    f_idx = name_to_idx[col_name]
+                    f_idx = ctx.name_to_idx[col_name]
                     vec[f_idx] = (basis[k] - scaler.mean_[f_idx]) / scaler.scale_[f_idx]
                 dist_scenario_vecs[label] = vec
 
@@ -180,8 +108,8 @@ def run_posterior_analysis() -> None:
         for f_name, val in s.items():
             if f_name == "distance":
                 continue
-            if f_name in name_to_idx:
-                f_idx = name_to_idx[f_name]
+            if f_name in ctx.name_to_idx:
+                f_idx = ctx.name_to_idx[f_name]
                 if f_name not in ("opps_within_1yd", "opps_within_2yd", "opps_within_4yd",
                                    "has_progressive_option"):
                     vec[f_idx] = (val - scaler.mean_[f_idx]) / scaler.scale_[f_idx]
@@ -197,22 +125,22 @@ def run_posterior_analysis() -> None:
         p_code: int | None = None,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         code = p_code if p_code is not None else mid_pos_code
-        pos_effect_succ = gamma_pos_succ[:, code]
-        pos_effect_val = gamma_pos_val[:, code]
+        pos_effect_succ = ctx.gamma_pos_succ[:, code]
+        pos_effect_val = ctx.gamma_pos_val[:, code]
 
-        scenario_global = scenario_vec[global_mask]
-        scenario_pos = scenario_vec[pos_specific_mask]
-        feat_contrib_succ = np.dot(beta_global_succ, scenario_global) + np.dot(beta_pos_succ[:, code], scenario_pos)
-        feat_contrib_val = np.dot(beta_global_val, scenario_global) + np.dot(beta_pos_val[:, code], scenario_pos)
+        scenario_global = scenario_vec[ctx.global_mask]
+        scenario_pos = scenario_vec[ctx.pos_specific_mask]
+        feat_contrib_succ = np.dot(ctx.beta_global_succ, scenario_global) + np.dot(ctx.beta_pos_succ[:, code], scenario_pos)
+        feat_contrib_val = np.dot(ctx.beta_global_val, scenario_global) + np.dot(ctx.beta_pos_val[:, code], scenario_pos)
 
-        logit_succ = (alpha_succ + feat_contrib_succ + pos_effect_succ
+        logit_succ = (ctx.alpha_succ + feat_contrib_succ + pos_effect_succ
                       + mean_opp_succ + mean_comp_succ + mean_team_succ)
-        logit_val = (alpha_val + feat_contrib_val + pos_effect_val
+        logit_val = (ctx.alpha_val + feat_contrib_val + pos_effect_val
                      + mean_opp_val + mean_comp_val + mean_team_val)
 
         if player_idx is not None:
-            logit_succ += theta_succ[:, player_idx]
-            logit_val += theta_val[:, player_idx]
+            logit_succ += ctx.theta_succ[:, player_idx]
+            logit_val += ctx.theta_val[:, player_idx]
 
         prob_success: np.ndarray = expit(logit_succ)
         expected_value_retention: np.ndarray = expit(logit_val) * max_value + min_value
@@ -258,8 +186,8 @@ def run_posterior_analysis() -> None:
                     max_advantage = advantage
                     best_scenario = s_name
 
-            ball_security_samples: np.ndarray = theta_succ[:, idx_num]
-            value_retention_samples: np.ndarray = theta_val[:, idx_num]
+            ball_security_samples: np.ndarray = ctx.theta_succ[:, idx_num]
+            value_retention_samples: np.ndarray = ctx.theta_val[:, idx_num]
             prs_samples: np.ndarray = ball_security_samples + value_retention_samples
 
             # Use ArviZ HDI for proper Highest Density Interval
@@ -283,10 +211,10 @@ def run_posterior_analysis() -> None:
 
     lb_df = pd.DataFrame(leaderboard).sort_values(by="mean_PRS", ascending=False)
 
-    TABLES_DIR.mkdir(parents=True, exist_ok=True)
-    out_path: Path = TABLES_DIR / f"prs_leaderboard_{holdout}.csv"
-    lb_df.to_csv(out_path, index=False)
-    logger.info("Saved leaderboard with %d players (n>=%d) to %s", len(lb_df), MIN_EVENTS_THRESHOLD, out_path)
+    out = ModelPaths(ctx.holdout)
+    out.leaderboard.parent.mkdir(parents=True, exist_ok=True)
+    lb_df.to_csv(out.leaderboard, index=False)
+    logger.info("Saved leaderboard with %d players (n>=%d) to %s", len(lb_df), MIN_EVENTS_THRESHOLD, out.leaderboard)
 
     top_players = lb_df.head(10)
     logger.info("\n=== TOP 10 PRESSURE RESISTANCE SCORES ===")

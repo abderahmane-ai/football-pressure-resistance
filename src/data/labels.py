@@ -8,6 +8,16 @@ import numpy as np
 import pandas as pd
 
 from config import SPATIAL_CONFIG
+from src.common import (
+    EVENT_TYPE_CARRY,
+    EVENT_TYPE_CLEARANCE,
+    EVENT_TYPE_DISPOSSESSED,
+    EVENT_TYPE_DRIBBLE,
+    EVENT_TYPE_FOUL_COMMITTED,
+    EVENT_TYPE_INTERCEPTION,
+    EVENT_TYPE_PASS,
+    EVENT_TYPE_SHOT,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +53,7 @@ def define_success(
 
         success: float = np.nan
 
-        if bc_event["type"] == "Pass":
+        if bc_event["type"] == EVENT_TYPE_PASS:
             if pd.isna(bc_event.get("pass_outcome")):
                 # NaN pass_outcome = complete in StatsBomb
                 if pd.isna(bc_event.get("pass_recipient")) and bc_idx + 1 < len(events):
@@ -56,12 +66,12 @@ def define_success(
                     success = 1.0
             else:
                 success = 0.0
-        elif bc_event["type"] == "Dribble":
+        elif bc_event["type"] == EVENT_TYPE_DRIBBLE:
             if bc_event.get("dribble_outcome") == "Complete":
                 success = 1.0
             else:
                 success = 0.0
-        elif bc_event["type"] == "Carry":
+        elif bc_event["type"] == EVENT_TYPE_CARRY:
             # Default is NaN (unknown) — not 0.0 — so that carries whose
             # lookahead window contains only irrelevant event types (Ball
             # Receipt, Tactical Shift, etc.) are *excluded* rather than
@@ -75,15 +85,15 @@ def define_success(
                 # Explicit possession-loss events — checked first because Dispossessed
                 # is logged under the carrier's own team_id, which would otherwise
                 # incorrectly satisfy the "same team acts next" condition below.
-                if ev_type in ("Dispossessed", "Interception"):
+                if ev_type in (EVENT_TYPE_DISPOSSESSED, EVENT_TYPE_INTERCEPTION):
                     success = 0.0
                     break
                 # Opponent commits a foul on the carrier — free kick won
-                elif ev_type == "Foul Committed" and next_event["team_id"] != bc_event["team_id"]:
+                elif ev_type == EVENT_TYPE_FOUL_COMMITTED and next_event["team_id"] != bc_event["team_id"]:
                     success = 1.0
                     break
                 # Opponent wins ball cleanly
-                elif ev_type in ("Pass", "Carry", "Dribble", "Shot", "Clearance") and next_event["team_id"] != bc_event["team_id"]:
+                elif ev_type in (EVENT_TYPE_PASS, EVENT_TYPE_CARRY, EVENT_TYPE_DRIBBLE, EVENT_TYPE_SHOT, EVENT_TYPE_CLEARANCE) and next_event["team_id"] != bc_event["team_id"]:
                     success = 0.0
                     break
                 # Same team retains possession

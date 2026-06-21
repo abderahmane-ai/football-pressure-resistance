@@ -76,8 +76,10 @@ def test_mcmc_smoke(tmp_path, monkeypatch):
     traces_dir.mkdir()
     processed_dir.mkdir()
 
-    monkeypatch.setattr(bayesian, "MODEL_TRACES_DIR", traces_dir)
-    monkeypatch.setattr(bayesian, "PROCESSED_DATA_DIR", processed_dir)
+    monkeypatch.setattr("config.MODEL_TRACES_DIR", traces_dir)
+    monkeypatch.setattr("config.PROCESSED_DATA_DIR", processed_dir)
+    monkeypatch.setattr("src.paths.MODEL_TRACES_DIR", traces_dir)
+    monkeypatch.setattr("src.paths.PROCESSED_DATA_DIR", processed_dir)
     monkeypatch.setenv("PRS_ALLOW_CPU", "1")
 
     # 2. Modify model settings to make it super fast

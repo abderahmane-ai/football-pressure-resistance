@@ -10,6 +10,16 @@ import numpy as np
 import pandas as pd
 
 from config import SPATIAL_CONFIG
+from src.common import (
+    BALL_CARRIER_EVENT_TYPES,
+    EVENT_TYPE_CARRY,
+    EVENT_TYPE_DRIBBLE,
+    EVENT_TYPE_OWN_GOAL_FOR,
+    EVENT_TYPE_PASS,
+    EVENT_TYPE_PRESSURE,
+    EVENT_TYPE_SHOT,
+    is_valid_loc,
+)
 from src.data.labels import define_success
 from src.data.pairing import pair_pressure_with_ball_carrier
 from src.features.geometry import xt_value
@@ -24,11 +34,6 @@ except ImportError:
     compute_vaep = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
-
-
-def _is_valid_loc(loc: Any) -> bool:
-    """Accept list, tuple, or numpy array with at least 2 elements."""
-    return loc is not None and hasattr(loc, "__len__") and len(loc) >= 2
 
 
 def compute_game_state_for_match(match_events: pd.DataFrame) -> dict[str, int]:
@@ -51,7 +56,7 @@ def compute_game_state_for_match(match_events: pd.DataFrame) -> dict[str, int]:
     team_a, team_b = teams[0], teams[1]
 
     # Vectorized check of goals scored
-    is_shot = match_events["type"] == "Shot"
+    is_shot = match_events["type"] == EVENT_TYPE_SHOT
     shot_outcome_col = match_events.get("shot_outcome")
     shot_outcome_name_col = match_events.get("shot_outcome_name")
     if shot_outcome_col is not None and shot_outcome_name_col is not None:
@@ -62,7 +67,7 @@ def compute_game_state_for_match(match_events: pd.DataFrame) -> dict[str, int]:
         shot_outcome = shot_outcome_name_col
 
     is_goal = is_shot & (shot_outcome == "Goal") if shot_outcome is not None else pd.Series(False, index=match_events.index)
-    is_own_goal = match_events["type"] == "Own Goal For"
+    is_own_goal = match_events["type"] == EVENT_TYPE_OWN_GOAL_FOR
 
     goal_a = (is_goal | is_own_goal) & (match_events["team_id"] == team_a)
     goal_b = (is_goal | is_own_goal) & (match_events["team_id"] == team_b)
@@ -123,7 +128,7 @@ def compute_intended_xt(
         bc_idx = bc_event_rows.index[0]
 
     bc_loc = bc_event.get("location")
-    if not _is_valid_loc(bc_loc):
+    if not is_valid_loc(bc_loc):
         if bc_idx > 0:
             if match_events_list is not None:
                 prev_event = match_events_list[bc_idx - 1]
@@ -131,9 +136,9 @@ def compute_intended_xt(
                 prev_event = match_events.iloc[bc_idx - 1]
             end_loc = prev_event.get("end_location")
             prev_loc = prev_event.get("location")
-            if _is_valid_loc(end_loc):
+            if is_valid_loc(end_loc):
                 bc_loc = end_loc
-            elif _is_valid_loc(prev_loc):
+            elif is_valid_loc(prev_loc):
                 bc_loc = prev_loc
             else:
                 return None
@@ -145,24 +150,24 @@ def compute_intended_xt(
 
     bc_event_type = bc_event.get("type")
 
-    if bc_event_type == "Pass":
+    if bc_event_type == EVENT_TYPE_PASS:
         end_loc = bc_event.get("pass_end_location")
-        if _is_valid_loc(end_loc):
+        if is_valid_loc(end_loc):
             end_loc_seq_pass: Any = end_loc
             next_xt = xt_value(end_loc_seq_pass[0], end_loc_seq_pass[1])
-    elif bc_event_type == "Carry":
+    elif bc_event_type == EVENT_TYPE_CARRY:
         end_loc = bc_event.get("carry_end_location")
-        if _is_valid_loc(end_loc):
+        if is_valid_loc(end_loc):
             end_loc_seq_carry: Any = end_loc
             next_xt = xt_value(end_loc_seq_carry[0], end_loc_seq_carry[1])
-    elif bc_event_type == "Dribble":
+    elif bc_event_type == EVENT_TYPE_DRIBBLE:
         length = len(match_events_list) if match_events_list is not None else len(match_events)
         if bc_idx + 1 < length:
             if match_events_list is not None:
                 next_loc = match_events_list[bc_idx + 1].get("location")
             else:
                 next_loc = match_events.iloc[bc_idx + 1].get("location")
-            if _is_valid_loc(next_loc):
+            if is_valid_loc(next_loc):
                 next_loc_seq_dribble: Any = next_loc
                 next_xt = xt_value(next_loc_seq_dribble[0], next_loc_seq_dribble[1])
     else:
@@ -172,19 +177,114 @@ def compute_intended_xt(
                 next_loc = match_events_list[bc_idx + 1].get("location")
             else:
                 next_loc = match_events.iloc[bc_idx + 1].get("location")
-            if _is_valid_loc(next_loc):
+            if is_valid_loc(next_loc):
                 next_loc_seq_else: Any = next_loc
                 next_xt = xt_value(next_loc_seq_else[0], next_loc_seq_else[1])
 
     return float(next_xt)
 
 
+# ── Private helpers for `process_single_match` ────────────────────────────────
+
+
+def _precompute_match_lookups(
+    match_events: pd.DataFrame,
+) -> tuple[dict[str, dict[str, Any]], dict[str, int], dict[int, str], list[dict[str, Any]]]:
+    """Build O(1) lookup structures used by the per-match worker loop."""
+    event_lookup: dict[str, dict[str, Any]] = {}
+    if "id" in match_events.columns:
+        event_lookup = match_events.set_index("id").to_dict(orient="index")
+
+    id_to_idx: dict[str, int] = {
+        eid: idx for idx, eid in enumerate(match_events["id"]) if isinstance(eid, str)
+    }
+
+    player_name_lookup: dict[int, str] = {}
+    if "player_id" in match_events.columns and "player" in match_events.columns:
+        player_name_lookup = (
+            match_events.dropna(subset=["player_id", "player"])
+            .drop_duplicates("player_id")
+            .set_index("player_id")["player"]
+            .to_dict()
+        )
+
+    match_events_list: list[dict[str, Any]] = match_events.to_dict(orient="records")
+    return event_lookup, id_to_idx, player_name_lookup, match_events_list
+
+
+def _precompute_vaep(match_events: pd.DataFrame, match_id: int) -> None:
+    """Compute VAEP for all events in this match and store in the thread-local cache."""
+    if not hasattr(_vaep_cache, "data"):
+        _vaep_cache.data = {}
+    _vaep_cache.data.clear()
+    if _has_vaep and compute_vaep is not None:
+        try:
+            vaep_values = compute_vaep(match_events)
+            if vaep_values is not None and "id" in match_events.columns:
+                _vaep_cache.data[match_id] = dict(zip(match_events["id"], vaep_values))
+        except Exception:
+            logger.debug("VAEP computation failed for match %d, falling back to xT", match_id)
+
+
+def _precompute_recent_pressures(
+    match_events_list: list[dict[str, Any]],
+    pressure_bc_ids: set[str],
+) -> dict[str, int]:
+    """Per-player rolling count of pressured actions among the last 5 touches."""
+    player_carrier_events: dict[int, list[dict[str, Any]]] = {}
+    for ev in match_events_list:
+        if ev.get("type") in BALL_CARRIER_EVENT_TYPES:
+            pid = ev.get("player_id")
+            if pid is not None:
+                player_carrier_events.setdefault(pid, []).append(ev)
+
+    recent_pressures_lookup: dict[str, int] = {}
+    for evs in player_carrier_events.values():
+        for idx, ev in enumerate(evs):
+            start_idx = max(0, idx - 5)
+            prior_evs = evs[start_idx:idx]
+            n_press = sum(1 for pev in prior_evs if pev.get("id") in pressure_bc_ids)
+            recent_pressures_lookup[ev["id"]] = n_press
+    return recent_pressures_lookup
+
+
+def _compute_match_context(
+    carrier_event_id: str,
+    pressure_event_id: str,
+    event_lookup: dict[str, dict[str, Any]],
+    game_states: dict[str, int],
+    recent_pressures_lookup: dict[str, int],
+) -> dict[str, Any]:
+    """Build the match_context dict for a single pressure-carrier pair."""
+    ev = event_lookup.get(carrier_event_id)
+    press_ev = event_lookup.get(pressure_event_id)
+    ctx: dict[str, Any] = {}
+
+    if ev is not None:
+        ctx["minutes_elapsed"] = ev.get("minute", 0)
+        ctx["match_period"] = ev.get("period", 1)
+        ctx["game_state_diff"] = game_states.get(carrier_event_id, 0)
+
+    ctx["counter_press"] = bool(press_ev.get("counterpress", False)) if press_ev else False
+    ctx["recent_pressures"] = recent_pressures_lookup.get(carrier_event_id, 0)
+
+    # Pass height (categorical: Ground/Low/High)
+    ph_id = 0
+    if ev is not None and ev.get("type") == EVENT_TYPE_PASS:
+        pass_info = ev.get("pass")
+        if isinstance(pass_info, dict):
+            height_info = pass_info.get("height")
+            if isinstance(height_info, dict):
+                ph_id = int(height_info.get("id", 0))
+    ctx["pass_height_id"] = ph_id
+
+    return ctx
+
+
 def process_single_match(
     args: tuple[int, pd.DataFrame, pd.DataFrame, set[int], dict[Any, str], str],
 ) -> list[dict[str, Any]]:
-    """
-    Module-level worker for parallel match processing.
-    Returns a list of processed row dicts for one match.
+    """Module-level worker for parallel match processing.
 
     Args tuple: (match_id, match_events, frames_df, gk_ids, position_groups, comp_name)
     """
@@ -194,111 +294,43 @@ def process_single_match(
     n_features_ok = 0
     n_dist_ok = 0
     n_xt_ok = 0
+
     try:
         game_states = compute_game_state_for_match(match_events)
-        n_pressure = len(match_events[match_events["type"] == "Pressure"])
+        n_pressure = len(match_events[match_events["type"] == EVENT_TYPE_PRESSURE])
         logger.debug("Match %d: events=%d, pressure_events=%d", match_id, len(match_events), n_pressure)
+
         paired_events = pair_pressure_with_ball_carrier(match_events, frames_df)
         logger.debug("Match %d: paired_events=%d", match_id, len(paired_events))
+
         labeled_events = define_success(match_events, paired_events)
         logger.debug("Match %d: labeled_events=%d", match_id, len(labeled_events))
-
-        # Convert DataFrame to list of dict records once per match for fast C-level loop lookups
-        match_events_list = match_events.to_dict(orient="records")
-
-        # Build O(1) event lookup (dict of dicts)
-        event_lookup: dict[str, dict[str, Any]] = {}
-        if "id" in match_events.columns:
-            event_lookup = match_events.set_index("id").to_dict(orient="index")
-
-        # Build O(1) event index lookup
-        id_to_idx: dict[str, int] = {eid: idx for idx, eid in enumerate(match_events["id"]) if isinstance(eid, str)}
-
-        # Precompute player name lookup once per match
-        player_name_lookup: dict[int, str] = {}
-        if "player_id" in match_events.columns and "player" in match_events.columns:
-            player_name_lookup = (
-                match_events.dropna(subset=["player_id", "player"])
-                .drop_duplicates("player_id")
-                .set_index("player_id")["player"]
-                .to_dict()
-            )
-
-        # Pre-compute VAEP for all events in this match (per-thread cache)
-        if not hasattr(_vaep_cache, "data"):
-            _vaep_cache.data = {}
-        _vaep_cache.data.clear()
-        if _has_vaep and compute_vaep is not None:
-            try:
-                vaep_values = compute_vaep(match_events)
-                if vaep_values is not None and "id" in match_events.columns:
-                    match_vaep = dict(zip(match_events["id"], vaep_values))
-                    _vaep_cache.data[match_id] = match_vaep
-            except Exception:
-                logger.debug("VAEP computation failed for match %d, falling back to xT", match_id)
-
         n_labeled = len(labeled_events)
 
-        # Build set of ball-carrier events that are under pressure (for temporal density)
+        # ── Build lookups ────────────────────────────────────────────────────
+        event_lookup, id_to_idx, player_name_lookup, match_events_list = (
+            _precompute_match_lookups(match_events)
+        )
+        _precompute_vaep(match_events, match_id)
+
         pressure_bc_ids: set[str] = {item["ball_carrier_event_id"] for item in labeled_events}
+        recent_pressures_lookup = _precompute_recent_pressures(
+            match_events_list, pressure_bc_ids,
+        )
 
-        # Chronological touch sequences per player to compute rolling pressures count
-        player_carrier_events: dict[int, list[dict[str, Any]]] = {}
-        for ev in match_events_list:
-            if ev.get("type") in {"Pass", "Carry", "Dribble"}:
-                pid = ev.get("player_id")
-                if pid is not None:
-                    if pid not in player_carrier_events:
-                        player_carrier_events[pid] = []
-                    player_carrier_events[pid].append(ev)
-
-        recent_pressures_lookup: dict[str, int] = {}
-        for pid, evs in player_carrier_events.items():
-            for idx, ev in enumerate(evs):
-                start_idx = max(0, idx - 5)
-                prior_evs = evs[start_idx:idx]
-                n_press = sum(1 for pev in prior_evs if pev.get("id") in pressure_bc_ids)
-                recent_pressures_lookup[ev["id"]] = n_press
-
+        # ── Process each labelled event ──────────────────────────────────────
         for item in labeled_events:
             player_id = item.get("player_id")
             if player_id is None or player_id in gk_ids:
                 continue
 
-            ev = event_lookup.get(item["ball_carrier_event_id"])
-            match_context: dict[str, Any] = {}
-            if ev is not None:
-                if "minute" in ev:
-                    match_context["minutes_elapsed"] = ev["minute"]
-                if "period" in ev:
-                    match_context["match_period"] = ev["period"]
-                match_context["game_state_diff"] = game_states.get(item["ball_carrier_event_id"], 0)
-
-            # Counter-press flag from the pressure event
-            press_ev = event_lookup.get(item["pressure_event_id"])
-            if press_ev is not None:
-                match_context["counter_press"] = press_ev.get("counterpress", False)
-            else:
-                match_context["counter_press"] = False
-
-            # Pass height from the ball-carrier event (categorical: Ground/Low/High)
-            if ev is not None and ev.get("type") == "Pass":
-                pass_info = ev.get("pass")
-                if isinstance(pass_info, dict):
-                    height_info = pass_info.get("height")
-                    if isinstance(height_info, dict):
-                        match_context["pass_height_id"] = height_info.get("id", 0)
-                    else:
-                        match_context["pass_height_id"] = 0
-                else:
-                    match_context["pass_height_id"] = 0
-            else:
-                match_context["pass_height_id"] = 0
-
-            # Count how many of this player's last 5 carrier events were under
-            # pressure — a proxy for sustained pressure intensity that the
-            # static freeze-frame cannot capture (fatigue, targeted pressing).
-            match_context["recent_pressures"] = recent_pressures_lookup.get(item["ball_carrier_event_id"], 0)
+            match_context = _compute_match_context(
+                item["ball_carrier_event_id"],
+                item["pressure_event_id"],
+                event_lookup,
+                game_states,
+                recent_pressures_lookup,
+            )
 
             features = extract_spatial_features_from_frame(
                 frame_data=item["frame_data"],
@@ -314,12 +346,13 @@ def process_single_match(
                 continue
             n_dist_ok += 1
 
-            intended_xt = compute_intended_xt(item, match_events, id_to_idx=id_to_idx, match_events_list=match_events_list)
+            intended_xt = compute_intended_xt(
+                item, match_events, id_to_idx=id_to_idx, match_events_list=match_events_list,
+            )
             if intended_xt is None:
                 continue
             n_xt_ok += 1
 
-            # Player name lookup via pre-caching
             player_name = player_name_lookup.get(player_id, f"Player_{player_id}")
 
             row: dict[str, Any] = {
@@ -339,13 +372,18 @@ def process_single_match(
             }
             row.update(features)
             rows.append(row)
+
     except Exception as e:
         logger.warning(
             "Match %d (%s) worker failed: %s\n%s",
             match_id, comp_name, e, traceback.format_exc(),
         )
+
     if not rows:
-        logger.debug("Match %d: n_labeled=%d, n_features_ok=%d, n_dist_ok=%d, n_xt_ok=%d", match_id, n_labeled, n_features_ok, n_dist_ok, n_xt_ok)
+        logger.debug(
+            "Match %d: n_labeled=%d, n_features_ok=%d, n_dist_ok=%d, n_xt_ok=%d",
+            match_id, n_labeled, n_features_ok, n_dist_ok, n_xt_ok,
+        )
         logger.debug(
             "Match %d (%s): worker produced 0 rows — all events filtered or no pressure events found",
             match_id, comp_name,
