@@ -44,6 +44,19 @@ _VAEP_SCORE_FILENAME: str = "vaep_score.pkl"
 _VAEP_CONCEDE_FILENAME: str = "vaep_concede.pkl"
 
 
+def _vaep_model_paths() -> tuple[Path, Path]:
+    """Return (score_path, concede_path) for the current holdout.
+
+    VAEP models are holdout-specific so that each CV fold trains on all
+    competitions EXCEPT its own holdout.  The holdout subdirectory mirrors
+    the pattern used by ModelPaths for traces and scalers.
+    """
+    import os
+    holdout = os.environ.get("PRS_HOLDOUT", "Euro_2020")
+    base = _VAEP_MODEL_DIR / holdout
+    return base / _VAEP_SCORE_FILENAME, base / _VAEP_CONCEDE_FILENAME
+
+
 def _extract_state_features(events: pd.DataFrame) -> pd.DataFrame:
     """Build feature matrix from raw StatsBomb events.
 
@@ -182,9 +195,8 @@ def train_vaep_models(events: pd.DataFrame) -> tuple[Any, Any]:
     """
     if not _HAS_ML_LIBS or lgb is None or joblib is None:
         raise ImportError("lightgbm and joblib are required to train VAEP models.")
-    _VAEP_MODEL_DIR.mkdir(parents=True, exist_ok=True)
-    score_path = _VAEP_MODEL_DIR / _VAEP_SCORE_FILENAME
-    concede_path = _VAEP_MODEL_DIR / _VAEP_CONCEDE_FILENAME
+    score_path, concede_path = _vaep_model_paths()
+    score_path.parent.mkdir(parents=True, exist_ok=True)
 
     logger.info("Extracting state features for VAEP training...")
     features = _extract_state_features(events)
@@ -240,18 +252,18 @@ def load_vaep_models() -> tuple[Any, Any] | None:
 
     Models are cached at module level after first load to avoid repeated
     ``joblib.load`` deserialisation (called once per match during data building).
+    The cache is invalidated when the holdout changes (e.g. between CV folds).
     """
     global _VAEP_MODELS
     if _VAEP_MODELS is not None:
         return _VAEP_MODELS
     if not _HAS_ML_LIBS or joblib is None:
         return None
-    score_path = _VAEP_MODEL_DIR / _VAEP_SCORE_FILENAME
-    concede_path = _VAEP_MODEL_DIR / _VAEP_CONCEDE_FILENAME
+    score_path, concede_path = _vaep_model_paths()
     if not score_path.exists() or not concede_path.exists():
         logger.warning(
             "VAEP models not found at %s. Run train_vaep_models() first.",
-            _VAEP_MODEL_DIR,
+            score_path.parent,
         )
         return None
     score_model = joblib.load(score_path)

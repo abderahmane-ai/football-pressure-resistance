@@ -32,8 +32,11 @@ logger = logging.getLogger(__name__)
 def main() -> None:
     logger.info("=== VAEP Model Training ===")
 
-    # Skip if models already exist (VAEP is invariant to CV holdout)
-    model_dir = Path(VAEP_CONFIG["model_dir"])  # type: ignore[arg-type]
+    # VAEP models are holdout-specific: each CV fold trains on all competitions
+    # EXCEPT its holdout, so the model must be cached per-holdout to prevent
+    # fold 2 from reusing fold 1's model (which included fold 2's holdout).
+    holdout = os.environ.get("PRS_HOLDOUT", "Euro_2020")
+    model_dir = Path(VAEP_CONFIG["model_dir"]) / holdout  # type: ignore[arg-type]
     score_path = model_dir / "vaep_score.pkl"
     concede_path = model_dir / "vaep_concede.pkl"
     if score_path.exists() and concede_path.exists():

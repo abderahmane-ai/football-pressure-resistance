@@ -29,10 +29,10 @@ _ESS_MIN_THRESHOLD: float = 100.0
 def _log_diagnostics(trace: az.InferenceData) -> None:
     """Log R-hat and ESS for the key player-effect parameters.
 
-    Emits warnings when R-hat exceeds the threshold or ESS is too low.
-    Does *not* halt execution — the caller decides how to handle degraded
-    diagnostics (the leaderboard CSV is still written so the user can inspect
-    it with full awareness).
+    ``az.summary`` names vector variables as ``theta_succ[0]``, ``theta_succ[1]``,
+    etc. — never the bare ``"theta_succ"``.  We therefore match by prefix and
+    report the worst-case R-hat and ESS across all per-player elements.
+    Emits warnings when thresholds are exceeded; does *not* halt execution.
     """
     key_params: list[str] = ["theta_succ", "theta_val"]
     available = [p for p in key_params if p in trace.posterior]  # type: ignore[attr-defined]
@@ -47,26 +47,34 @@ def _log_diagnostics(trace: az.InferenceData) -> None:
         return
 
     for param in available:
-        if param not in summary.index:
+        # Match per-player rows: theta_succ[0], theta_succ[1], ...
+        mask = summary.index.str.startswith(f"{param}[")
+        if not mask.any():
+            logger.warning("No per-player diagnostic rows for '%s' — skipping.", param)
             continue
-        row = summary.loc[param]
-        rhat: float = float(row.get("r_hat", 1.0))
-        ess_bulk: float = float(row.get("ess_bulk", 0.0))
 
-        if rhat > _RHAT_WARN_THRESHOLD:
+        rows = summary.loc[mask]
+        rhat_max: float = float(rows["r_hat"].max())
+        ess_bulk_min: float = float(rows["ess_bulk"].min())
+        n_players: int = len(rows)
+
+        if rhat_max > _RHAT_WARN_THRESHOLD:
             logger.warning(
-                "R-hat=%.2f for '%s' exceeds threshold %.2f — chains may not have converged. "
-                "Leaderboard scores should be treated as provisional.",
-                rhat, param, _RHAT_WARN_THRESHOLD,
+                "R-hat(max)=%.2f for '%s' (across %d players) exceeds threshold %.2f — "
+                "chains may not have converged. Leaderboard scores should be treated as provisional.",
+                rhat_max, param, n_players, _RHAT_WARN_THRESHOLD,
             )
         else:
-            logger.info("  %s: R-hat=%.3f  ESS(bulk)=%.0f", param, rhat, ess_bulk)
+            logger.info(
+                "  %s (%d players): R-hat(max)=%.3f  ESS(bulk, min)=%.0f",
+                param, n_players, rhat_max, ess_bulk_min,
+            )
 
-        if ess_bulk < _ESS_MIN_THRESHOLD:
+        if ess_bulk_min < _ESS_MIN_THRESHOLD:
             logger.warning(
-                "ESS(bulk)=%.0f for '%s' is below minimum %d — player effect "
-                "estimates have high Monte Carlo error.",
-                ess_bulk, param, int(_ESS_MIN_THRESHOLD),
+                "ESS(bulk, min)=%.0f for '%s' (across %d players) is below minimum %d — "
+                "player effect estimates have high Monte Carlo error.",
+                ess_bulk_min, param, n_players, int(_ESS_MIN_THRESHOLD),
             )
 
 

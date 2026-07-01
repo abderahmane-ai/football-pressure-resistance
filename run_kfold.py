@@ -115,15 +115,14 @@ def main() -> None:
             pearson = df['pearson'].iloc[0]
             auc = df['auc'].iloc[0]
             results.append({
-                "Fold": fold + 1,
                 "Holdout": holdout,
                 "Pearson": pearson,
                 "AUC": auc,
                 "Time_Mins": round(fold_time / 60, 1)
             })
-            logger.info("Fold %d Results -> Pearson: %.3f, AUC: %.3f", fold + 1, pearson, auc)
+            logger.info("Holdout %d Results -> Pearson: %.3f, AUC: %.3f", fold, pearson, auc)
         else:
-            logger.error("Metrics file not found for fold %d. Validation step may have failed.", fold + 1)
+            logger.error("Metrics file not found for holdout %d. Validation step may have failed.", fold)
             sys.exit(1)
 
     if not single_holdout:
