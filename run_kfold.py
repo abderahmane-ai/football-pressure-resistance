@@ -56,7 +56,7 @@ def main() -> None:
         logger.info("Running full cross-validation over all comps: %s", comps_to_run)
 
     n_folds = len(COMPS)
-    logger.info("Starting %d-Fold Cross Validation Pipeline", n_folds)
+    logger.info("Starting leave-one-competition-out cross-validation over %d competitions", n_folds)
     check_optimization()
     python_cmd = get_python_cmd()
     logger.info("Using Python executable: %s", python_cmd)
@@ -66,7 +66,7 @@ def main() -> None:
     for holdout in comps_to_run:
         fold = COMPS.index(holdout) + 1
         logger.info("%s", '=' * 60)
-        logger.info("FOLD %d/%d: Holdout = %s", fold, n_folds, holdout)
+        logger.info("HOLDOUT %d/%d: %s", fold, n_folds, holdout)
         logger.info("%s", '=' * 60)
 
         env = os.environ.copy()
@@ -107,7 +107,7 @@ def main() -> None:
             run_step(step, model_env)
 
         fold_time = time.time() - start_time
-        logger.info("Fold %d completed in %.1f minutes.", fold + 1, fold_time / 60)
+        logger.info("Holdout %d completed in %.1f minutes.", fold, fold_time / 60)
 
         metrics_file = TABLES_DIR / f"holdout_metrics_{holdout}.csv"
         if metrics_file.exists():
@@ -128,7 +128,7 @@ def main() -> None:
 
     if not single_holdout:
         logger.info("%s", '=' * 60)
-        logger.info("FINAL CROSS-VALIDATION RESULTS")
+        logger.info("LEAVE-ONE-COMPETITION-OUT RESULTS")
         logger.info("%s", '=' * 60)
 
         res_df = pd.DataFrame(results)

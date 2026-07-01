@@ -119,7 +119,15 @@ def run_cross_validation() -> None:
     # Spearman computed for diagnostic logging only; not persisted to CSV
     spearman_corr, p_s = spearmanr(merged["mean_PRS"], merged["residual"])
 
-    logger.info("Stability Analysis (n=%d overlapping players):", len(merged))
+    # Count player overlap: training vs holdout intersection
+    n_train_players: int = len(train_lb)
+    n_holdout_players: int = len(player_stats)
+    n_overlap: int = len(merged)
+
+    logger.info(
+        "Stability Analysis: %d training players, %d holdout players, %d overlap",
+        n_train_players, n_holdout_players, n_overlap,
+    )
     logger.info("  Pearson Correlation: %.3f (p=%.4f)", pearson_corr, p_p)
     logger.info("  Spearman Correlation: %.3f (p=%.4f)", spearman_corr, p_s)
 
@@ -149,7 +157,9 @@ def run_cross_validation() -> None:
     merged.to_csv(out.holdout_correlation, index=False)
 
     metrics_df = pd.DataFrame([{
-        "n_players": len(merged),
+        "n_overlap": n_overlap,
+        "n_train_players": n_train_players,
+        "n_holdout_players": n_holdout_players,
         "pearson": pearson_corr,
         "pearson_p": p_p,
         "auc": auc,

@@ -18,6 +18,57 @@ from src.paths import ModelPaths
 
 logger = logging.getLogger(__name__)
 
+# R-hat threshold above which a warning is emitted.  Vehtari et al. (2021)
+# recommend 1.01 as a strict bound; we use 1.05 as a practical gate — values
+# above this mean the chains almost certainly haven't converged.
+_RHAT_WARN_THRESHOLD: float = 1.05
+# Minimum effective sample size (bulk) before we consider a parameter reliable.
+_ESS_MIN_THRESHOLD: float = 100.0
+
+
+def _log_diagnostics(trace: az.InferenceData) -> None:
+    """Log R-hat and ESS for the key player-effect parameters.
+
+    Emits warnings when R-hat exceeds the threshold or ESS is too low.
+    Does *not* halt execution — the caller decides how to handle degraded
+    diagnostics (the leaderboard CSV is still written so the user can inspect
+    it with full awareness).
+    """
+    key_params: list[str] = ["theta_succ", "theta_val"]
+    available = [p for p in key_params if p in trace.posterior]  # type: ignore[attr-defined]
+    if not available:
+        logger.warning("Cannot compute diagnostics — no player-effect parameters in trace.")
+        return
+
+    try:
+        summary = az.summary(trace, var_names=available, kind="diagnostics")
+    except Exception as exc:
+        logger.warning("Could not compute convergence diagnostics: %s", exc)
+        return
+
+    for param in available:
+        if param not in summary.index:
+            continue
+        row = summary.loc[param]
+        rhat: float = float(row.get("r_hat", 1.0))
+        ess_bulk: float = float(row.get("ess_bulk", 0.0))
+
+        if rhat > _RHAT_WARN_THRESHOLD:
+            logger.warning(
+                "R-hat=%.2f for '%s' exceeds threshold %.2f — chains may not have converged. "
+                "Leaderboard scores should be treated as provisional.",
+                rhat, param, _RHAT_WARN_THRESHOLD,
+            )
+        else:
+            logger.info("  %s: R-hat=%.3f  ESS(bulk)=%.0f", param, rhat, ess_bulk)
+
+        if ess_bulk < _ESS_MIN_THRESHOLD:
+            logger.warning(
+                "ESS(bulk)=%.0f for '%s' is below minimum %d — player effect "
+                "estimates have high Monte Carlo error.",
+                ess_bulk, param, int(_ESS_MIN_THRESHOLD),
+            )
+
 
 def run_posterior_analysis() -> None:
     """
@@ -54,6 +105,11 @@ def run_posterior_analysis() -> None:
             "Correlation ρ(θ_succ, θ_val): mean=%.3f, 90%% HDI=[%.3f, %.3f]",
             rho_mean, rho_hdi[0], rho_hdi[1],
         )
+
+    # ── Convergence diagnostics ──────────────────────────────────────────────
+    # Gate leaderboard generation on R-hat and ESS for the key player-effect
+    # parameters.  If the chains haven't mixed, the leaderboard is unreliable.
+    _log_diagnostics(ctx.trace)
 
     # Marginalise by posterior group mean; shape: (n_samples,)
     mean_opp_succ: np.ndarray = ctx.delta_opp_succ.mean(axis=1)

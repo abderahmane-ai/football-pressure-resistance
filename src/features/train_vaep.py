@@ -44,8 +44,15 @@ def main() -> None:
             )
             return
 
-    logger.info("Loading all competition events...")
-    all_comp_data = load_all_competitions(list(COMPETITIONS.keys()))
+    # Exclude the holdout competition from VAEP training to prevent data leakage.
+    # The VAEP value signal is used as a target in the Hurdle model; training
+    # VAEP on the holdout competition would contaminate out-of-sample evaluation.
+    holdout = os.environ.get("PRS_HOLDOUT", "Euro_2020")
+    comp_names = [c for c in COMPETITIONS if c != holdout]
+    logger.info(
+        "Loading competition events for VAEP training (excluding holdout: %s)...", holdout,
+    )
+    all_comp_data = load_all_competitions(comp_names)
 
     all_events: list[pd.DataFrame] = []
     for comp_name, comp_data in all_comp_data.items():
