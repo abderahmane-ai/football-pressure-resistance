@@ -117,7 +117,7 @@ def run_posterior_analysis() -> None:
                     vec[f_idx] = (0 - scaler.mean_[f_idx]) / scaler.scale_[f_idx]
         scenario_vectors[name] = vec
 
-    mid_pos_code: int = next((code for code, name in pos_mapping.items() if name == "Midfielder"), 0)
+    mid_pos_code: int = next((code for code, name in pos_mapping.items() if name == "CM"), 0)
 
     def get_predictions(
         scenario_vec: np.ndarray,
@@ -162,13 +162,13 @@ def run_posterior_analysis() -> None:
                 continue
 
             player_name: str = name_lookup.get(player_id, f"ID: {player_id}")
-            position_group: str = pos_lookup.get(player_id, "Midfielder")
+            position_group: str = pos_lookup.get(player_id, "CM")
 
             if position_group not in pos_mapping.values():
                 logger.warning(
                     "Player %s (%s) has position group '%s' which is not in model categories %s. "
-                    "Defaulting to 'Midfielder'.",
-                    player_id, player_name, position_group, list(pos_mapping.values())
+                    "Defaulting to 'CM'.",
+                    player_id, player_name, position_group, list(pos_mapping.values()),
                 )
 
             player_pos_code: int = next(

@@ -95,7 +95,7 @@ def run_interpretability_analysis() -> None:
     X = ctx.df[feature_names].values
     X_scaled = scaler.transform(X)
     rev_pos_mapping = {v: k for k, v in pos_mapping.items()}
-    pos_idx = ctx.df["position_group"].map(rev_pos_mapping).fillna(rev_pos_mapping.get("Midfielder", 0)).astype(int).values
+    pos_idx = ctx.df["position_group"].map(rev_pos_mapping).fillna(rev_pos_mapping.get("CM", 0)).astype(int).values
 
 
     # Ball security model — with correlated θ, extract sigma from packed Cholesky
@@ -183,7 +183,7 @@ def run_interpretability_analysis() -> None:
     # (Posterior arrays are already populated in ctx by load_posterior_context)
     logger.info("3. Population Marginal Effects")
 
-    mid_pos_code = next((code for code, name in pos_mapping.items() if name == 'Midfielder'), 0)
+    mid_pos_code = next((code for code, name in pos_mapping.items() if name == 'CM'), 0)
 
     def _feat_contrib(vec: np.ndarray, beta_g: np.ndarray, beta_p: np.ndarray, p_code: int) -> np.ndarray:
         """Feature contribution: global + position-specific for a given position."""

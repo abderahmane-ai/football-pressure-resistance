@@ -137,7 +137,7 @@ class TestRecentPressures:
         ])
 
         gk_ids = set()
-        position_groups = {'p1': 'Midfielder'}
+        position_groups = {'p1': 'CM'}
 
         args = (100, events, frames, gk_ids, position_groups, 'Test_Comp')
         rows = process_single_match(args)

@@ -24,7 +24,7 @@ def make_model_df(success_values=(1.0, 0.0)):
             "ball_carrier_event_id": f"carry_{idx}",
             "player_id": idx + 1,
             "player_name": f"Player {idx + 1}",
-            "position_group": "Midfielder",
+            "position_group": "CM",
             "team_id": 10,
             "opponent_team_id": 20,
             "success": success,

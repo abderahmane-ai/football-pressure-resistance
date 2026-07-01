@@ -53,7 +53,7 @@ def run_cross_validation() -> None:
     holdout_pos_codes: np.ndarray = (
         ctx.df["position_group"]
         .map(rev_pos_mapping)
-        .fillna(rev_pos_mapping.get("Midfielder", 0))
+        .fillna(rev_pos_mapping.get("CM", 0))
         .astype(int)
         .values
     )

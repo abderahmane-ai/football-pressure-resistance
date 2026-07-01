@@ -56,9 +56,9 @@ def _build_artifacts(tmp_path):
 
     mappings = {
         "player": {0: "p1", 1: "p2"},
-        "position": {0: "Midfielder"},
+        "position": {0: "CM"},
         "name_lookup": {"p1": "High Player", "p2": "Low Player"},
-        "position_lookup": {"p1": "Midfielder", "p2": "Midfielder"},
+        "position_lookup": {"p1": "CM", "p2": "CM"},
     }
     with open(traces_dir / f"pooled_mappings_{CROSS_VALIDATION_HOLDOUT}.pkl", "wb") as f:
         pickle.dump(mappings, f)
@@ -75,8 +75,8 @@ def _build_artifacts(tmp_path):
 
     # Write synthetic prs_leaderboard_{holdout}.csv
     leaderboard_df = pd.DataFrame([
-        {"player_id": "p1", "player_name": "High Player", "position_group": "Midfielder", "mean_PRS": 1.3},
-        {"player_id": "p2", "player_name": "Low Player", "position_group": "Midfielder", "mean_PRS": 0.3},
+        {"player_id": "p1", "player_name": "High Player", "position_group": "CM", "mean_PRS": 1.3},
+        {"player_id": "p2", "player_name": "Low Player", "position_group": "CM", "mean_PRS": 0.3},
     ])
     leaderboard_df.to_csv(tables_dir / f"prs_leaderboard_{CROSS_VALIDATION_HOLDOUT}.csv", index=False)
 
@@ -89,7 +89,7 @@ def _build_artifacts(tmp_path):
             "ball_carrier_event_id": f"carry_{player_id}",
             "player_id": player_id,
             "player_name": name,
-            "position_group": "Midfielder",
+            "position_group": "CM",
             "team_id": 1,
             "opponent_team_id": 2,
             "success": 1.0,

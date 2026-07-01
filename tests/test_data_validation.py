@@ -39,7 +39,7 @@ def valid_model_df():
         "ball_carrier_event_id": "carry_1",
         "player_id": 99,
         "player_name": "Player One",
-        "position_group": "Midfielder",
+        "position_group": "CM",
         "team_id": 1,
         "opponent_team_id": 2,
         "success": 1.0,
